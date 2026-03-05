@@ -1,0 +1,268 @@
+# ==========================================
+# Python
+# ==========================================
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+.Python
+build/
+develop-eggs/
+dist/
+downloads/
+eggs/
+.eggs/
+lib/
+lib64/
+parts/
+sdist/
+var/
+wheels/
+*.egg-info/
+.installed.cfg
+*.egg
+MANIFEST
+*.manifest
+*.spec
+
+# ==========================================
+# Virtual Environments
+# ==========================================
+venv/
+ENV/
+env/
+.venv/
+.ENV/
+.env/
+env.bak/
+venv.bak/
+pyvenv.cfg
+
+# ==========================================
+# Jupyter Notebook
+# ==========================================
+.ipynb_checkpoints
+*/.ipynb_checkpoints/*
+*.ipynb_checkpoints
+
+# ==========================================
+# IDEs
+# ==========================================
+.vscode/
+.idea/
+*.swp
+*.swo
+*~
+.DS_Store
+.AppleDouble
+.LSOverride
+*.sublime-project
+*.sublime-workspace
+.project
+.pydevproject
+.settings/
+.metadata
+.recommenders/
+
+# ==========================================
+# Environment Variables & Secrets
+# ==========================================
+.env
+.env.local
+.env.*.local
+*.pem
+*.key
+credentials.json
+secrets.yaml
+secrets.yml
+config.example.yaml
+
+# ==========================================
+# ML Artifacts & Data
+# ==========================================
+artifacts/
+models/
+*.pkl
+*.joblib
+*.h5
+*.hdf5
+*.pt
+*.pth
+*.ckpt
+*.model
+mlruns/
+mlflow-artifacts/
+
+# Data directories 
+# data/*
+!data/.gitkeep
+!data/raw/.gitkeep
+# data/raw/*.csv
+# data/processed/*
+data/interim/*
+data/external/*
+
+# Reports
+reports/
+*.html
+*.pdf
+
+# ==========================================
+# Docker
+# ==========================================
+*.log
+docker-compose.override.yml
+.dockerignore.bak
+
+# ==========================================
+# Airflow
+# ==========================================
+airflow/logs/
+airflow/*.db
+airflow/*.pid
+airflow/*.cfg
+airflow/*.err
+airflow/airflow-webserver.pid
+airflow/standalone_admin_password.txt
+logs/
+*.db
+*.db-journal
+*.db-shm
+*.db-wal
+
+# ==========================================
+# Backup & Archive Directories (EXCLUDE FROM GIT)
+# ==========================================
+ecs-backup/
+backup/
+archive/
+old/
+deprecated/
+temp/
+tmp/
+.backup/
+
+# ==========================================
+# ECS & AWS Deployment Files 
+# ==========================================
+ecs-deploy/
+*.ecs
+ecs_*.sh
+*_ecs.py
+ecs_*.template
+terraform.tfstate
+terraform.tfstate.backup
+.terraform/
+*.tfvars
+
+# ==========================================
+# Test Coverage & Reports
+# ==========================================
+.coverage
+.coverage.*
+htmlcov/
+.tox/
+.nox/
+coverage.xml
+*.cover
+.hypothesis/
+.pytest_cache/
+nosetests.xml
+test-results/
+junit/
+.mypy_cache/
+.dmypy.json
+dmypy.json
+.pyre/
+.pytype/
+bandit-report.json
+
+# ==========================================
+# Build & Distribution
+# ==========================================
+*.tar.gz
+*.zip
+*.whl
+*.dmg
+*.exe
+*.msi
+
+# ==========================================
+# OS Files
+# ==========================================
+Thumbs.db
+ehthumbs.db
+Desktop.ini
+$RECYCLE.BIN/
+*.cab
+*.msp
+*.msm
+*.lnk
+
+# ==========================================
+# Temporary Files
+# ==========================================
+*.tmp
+*.temp
+*.bak
+*.swp
+*~
+.~*
+\#*\#
+.\#*
+
+# ==========================================
+# Kafka & Streaming
+# ==========================================
+kafka-logs/
+zookeeper-data/
+consumer_offsets/
+
+# ==========================================
+# Spark
+# ==========================================
+spark-warehouse/
+metastore_db/
+derby.log
+*.parquet
+
+# ==========================================
+# MLflow
+# ==========================================
+mlruns/
+mlartifacts/
+mlflow.db
+
+# ==========================================
+# Monitoring & Profiling
+# ==========================================
+*.prof
+*.lprof
+*.pyprof
+*.trace
+
+# ==========================================
+# CI/CD
+# ==========================================
+.github/workflows/*_old.yml
+.github/workflows/*_backup.yml
+
+
+
+
+
+
+
+
+
+# ==========================================
+# Large Files
+# ==========================================
+*.bin
+*.dat
+*.csv.gz
+*.parquet
+*.feather
+
+# ECS deployment credentials (use 00_env.sh.example instead)
+ecs-deployment/00_env.sh

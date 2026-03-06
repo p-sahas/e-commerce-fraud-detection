@@ -266,3 +266,6 @@ mlflow.db
 
 # ECS deployment credentials (use 00_env.sh.example instead)
 ecs-deployment/00_env.sh
+
+# My Files
+Notes.md

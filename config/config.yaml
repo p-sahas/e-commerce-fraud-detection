@@ -1,0 +1,64 @@
+data_paths:
+  raw_data: "data/raw/Fraud_Data.csv"
+  processed_data: "data/processed/Fraud_Data_Processed.csv"
+  imputed_data: "data/processed/imputed.csv"
+  processed_dir: "data/processed"
+  artifacts_dir: "artifacts"
+  data_artifacts_dir: "artifacts/data"
+  model_artifacts_dir: "artifacts/models"
+  X_train: "artifacts/data/X_train.csv"
+  X_test: "artifacts/data/X_test.csv"
+  Y_train: "artifacts/data/Y_train.csv"
+  Y_test: "artifacts/data/Y_test.csv"
+
+
+evaluation:
+  metrics:
+    - "accuracy"
+    - "precision"
+    - "recall"
+    - "f1-score"
+    - "auc"
+  cv_folds: 5
+  random_state: 42
+
+deployment:
+  model_name: "fraud_detection_model"
+  model_version: "1.0.0"
+  api_endpoint: "/predict"
+  batch_size: 1000
+
+inference:
+  model_name: "random_forest_cv_model"
+  data_path: "artifacts/data/X_test.csv"
+  sample_size: 100
+  save_path: "artifacts/predictions/predictions.csv"
+  batch_size: 1000
+  return_proba: true
+
+logging:
+  level: "INFO"
+  format: "%(asctime)s - %(levelname)s - %(message)s"
+  file: "pipeline.log"
+
+mlflow:
+  tracking_uri: "file:./mlruns"  # Local file-based tracking
+  experiment_name: "E-Commerce Fraud Detection"
+  model_registry_name: "fraud_detection"
+  artifact_path: "model"
+  run_name_prefix: "fd_run"
+  tags:
+    project: "e-commerce_fraud_detection"
+    team: "ml_engineering"
+    environment: "development"
+  autolog: true
+
+environment:
+  experiment_name: "fraud_detection"
+
+pipeline:
+  data_pipeline_name: "data_pipeline"
+  training_pipeline_name: "model_training_pipeline"
+  deployment_pipeline_name: "model_deployment_pipeline"
+  inference_pipeline_name: "inference_pipeline"
+  enable_cache: false

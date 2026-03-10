@@ -86,5 +86,42 @@ def save_processed_data(
 
 
 def data_pipeline(
-        data_path: str = "data/raw/.csv",
-)
+        data_path: str = "data/raw/Fraud_Data.csv",
+        target_column: str = "class",
+        test_size: float = 0.2,
+        random_state: int = get_data_paths('random_state'),
+        output_format: str = "both",    
+        force_rebuild: str  = False,
+
+) -> Dict[str, np.ndarray]:
+    """
+    Main data pipeline function to load, preprocess, and split data.
+    
+    Args:
+        data_path: Path to the raw data file
+        target_column: Name of the target column
+        test_size: Proportion of data to be used as test set
+        random_state: Random seed for reproducibility
+        output_format: Format to save processed data ("csv", "parquet", or "both")
+        force_rebuild: Whether to force rebuild the data ("True", "False", "Existed")
+
+        Returns:
+        Dictionary containing paths to saved data files
+        """
+    
+    logger.info(f"\n{'='*80}")
+    logger.info(f"STARTING PYSPARK DATA PIPELINE")
+    logger.info(f"{'='*80}")
+    
+    # Input validation
+    if not os.path.exists(data_path):
+        logger.error(f" Data file not found: {data_path}")
+        raise FileNotFoundError(f"Data file not found: {data_path}")
+    
+    if not 0 < test_size < 1:
+        logger.error(f" Invalid test_size: {test_size}")
+        raise ValueError(f"Invalid test_size: {test_size}")
+    
+    # Initialize Spark session
+    spark = create_spark_session("ChurnPredictionDataPipeline")
+    

@@ -10,6 +10,7 @@ data_paths:
   X_test: "artifacts/data/X_test.csv"
   Y_train: "artifacts/data/Y_train.csv"
   Y_test: "artifacts/data/Y_test.csv"
+  random_state: 42
 
 
 evaluation:

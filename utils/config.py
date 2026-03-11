@@ -23,6 +23,10 @@ def get_data_paths():
     config = load_config()
     return config.get('data_paths', {})
 
+def get_columns():
+    config = load_config()
+    return config.get('columns', {})
+    
 def get_evaluation_config():
     config = load_config()
     return config.get('evaluation', {})

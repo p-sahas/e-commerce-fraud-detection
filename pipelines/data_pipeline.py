@@ -123,5 +123,16 @@ def data_pipeline(
         raise ValueError(f"Invalid test_size: {test_size}")
     
     # Initialize Spark session
-    spark = create_spark_session("ChurnPredictionDataPipeline")
+    spark = create_spark_session("FraudDetectionDataPipeline")
+    
+    # Load Configurations
+    try:
+        data_paths = get_data_paths()
+        columns = get_columns()
+
+    except Exception as e:
+        logger.error(f" Data Pipeline Filed: {str(e)}")
+
+    finally:
+        stop_spark_session(spark)
     

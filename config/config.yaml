@@ -12,6 +12,16 @@ data_paths:
   Y_test: "artifacts/data/Y_test.csv"
   random_state: 42
 
+# "user_id","signup_time","purchase_time","purchase_value","device_id","source","browser","sex","age","ip_address","class"
+
+columns:
+  target: "class"
+  drop_columns: ""
+  critical_columns: ""
+  outlier_columns: ["purchase_value", "age"]
+  nominal_columns: ["device_id", "source", "browser", "sex"]
+  numeric_columns: ["purchase_value", "age", "ip_address"]
+  feature_columns:
 
 evaluation:
   metrics:

@@ -43,6 +43,10 @@ def get_logging_config():
     config = load_config()
     return config.get('logging', {})
 
+def get_outlier_config():
+    config = load_config()
+    return config.get('outlier_detection', {})
+
 
 def get_mlflow_config():
     config = load_config()

@@ -33,6 +33,12 @@ evaluation:
   cv_folds: 5
   random_state: 42
 
+outlier_detection:
+  outlier_columns: ""
+  detection_method: "iqr"
+  handling_method: "remove"
+  z_score_threshold: 3.0
+
 deployment:
   model_name: "fraud_detection_model"
   model_version: "1.0.0"

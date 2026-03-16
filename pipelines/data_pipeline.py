@@ -130,9 +130,13 @@ def data_pipeline(
         data_paths = get_data_paths()
         columns = get_columns()
 
+    
     except Exception as e:
         logger.error(f" Data Pipeline Filed: {str(e)}")
 
     finally:
         stop_spark_session(spark)
+
+
+
     

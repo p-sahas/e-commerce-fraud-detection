@@ -36,7 +36,7 @@ evaluation:
 outlier_detection:
   outlier_columns: ""
   detection_method: "iqr"
-  handling_method: "remove"
+  handling_method: "cap"
   z_score_threshold: 3.0
 
 deployment:

@@ -59,3 +59,11 @@ def get_environment_config():
 def get_pipeline_config():
     config = load_config()
     return config.get('pipeline', {})
+
+def get_binning_config():
+    config = load_config()
+    return config.get('binning', {})
+
+def get_scaling_config():
+    config = load_config()
+    return config.get('scaling', {})

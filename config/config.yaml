@@ -16,11 +16,11 @@ data_paths:
 
 columns:
   target: "class"
-  drop_columns: ""
+  drop_columns: ["user_id"]
   critical_columns: ""
   outlier_columns: ["purchase_value", "age"]
-  nominal_columns: ["device_id", "source", "browser", "sex"]
-  numeric_columns: ["purchase_value", "age", "ip_address"]
+  nominal_columns: ["source", "browser", "sex"]
+  numeric_columns: ["purchase_value", "age", "ip_address", "time_to_purchase_secs", "purchase_hour", "purchase_day_of_week"]
   feature_columns:
 
 evaluation:
@@ -38,6 +38,18 @@ outlier_detection:
   detection_method: "iqr"
   handling_method: "cap"
   z_score_threshold: 3.0
+
+binning:
+  age:
+    splits: [0.0, 25.0, 35.0, 50.0, 200.0]
+    labels: ["Young", "Adult", "Middle Age", "Senior"]
+  purchase_value:
+    splits: [0.0, 50.0, 150.0, 500.0, 100000.0]
+    labels: ["Low", "Medium", "High", "Very High"]
+
+scaling:
+  method: "standard"
+  columns: ["ip_address", "time_to_purchase_secs", "purchase_hour", "purchase_day_of_week"]
 
 deployment:
   model_name: "fraud_detection_model"

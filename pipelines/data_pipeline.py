@@ -7,11 +7,7 @@ import os
 import sys
 import logging
 from typing import Dict
-import numpy as np
-import pandas as pd
-from pyspark.sql import DataFrame, SparkSession
-from pyspark.sql import functions as F
-from pyspark.ml import Pipeline, PipelineModel
+from pyspark.sql import DataFrame
 
 # Configure Logging
 logging.basicConfig(
@@ -26,14 +22,24 @@ from outlier_detection import OutlierDetector, IQROutlierDetection
 from preprocessing import (
     load_raw_data,
     clean_data,
+    impute_missing_values,
     engineer_features,
+    bin_features,
     encode_categorical_features,
     split_data,
+    scale_features,
+    separate_features_labels,
 )
 
 sys.path.append(os.path.join(os.path.dirname(__file__), '..', 'utils'))
-from spark_utils import save_dataframe, spark_to_pandas, get_dataframe_info, check_missing_values
-from config import get_data_paths, get_columns, get_outlier_config
+from spark_utils import save_dataframe, spark_to_pandas
+from config import (
+    get_data_paths,
+    get_columns,
+    get_outlier_config,
+    get_binning_config,
+    get_scaling_config,
+)
 
 
 def save_processed_data(
@@ -117,14 +123,14 @@ def data_pipeline(
         Dictionary containing paths to saved data files
     """
     logger.info(f"\n{'='*80}")
-    logger.info(f"STARTING PYSPARK DATA PIPELINE")
+    logger.info("STARTING PYSPARK DATA PIPELINE")
     logger.info(f"{'='*80}")
 
     # Short-circuit if outputs already exist and force_rebuild is False
-    data_paths = get_data_paths()
-    output_check_path = data_paths.get('X_train', 'artifacts/data/X_train.csv')
-    if not force_rebuild and os.path.exists(output_check_path):
-        logger.info(f" Processed data already exists at '{output_check_path}'.")
+    data_paths  = get_data_paths()
+    output_check = data_paths.get('X_train', 'artifacts/data/X_train.csv')
+    if not force_rebuild and os.path.exists(output_check):
+        logger.info(f" Processed data already exists at '{output_check}'.")
         logger.info(" Set force_rebuild=True to regenerate. Exiting pipeline.")
         return {
             'X_train_csv': data_paths.get('X_train'),
@@ -147,26 +153,31 @@ def data_pipeline(
 
     try:
         # Load configurations
-        columns_config = get_columns()
-        outlier_config = get_outlier_config()
+        columns_config  = get_columns()
+        outlier_config  = get_outlier_config()
+        binning_config  = get_binning_config()
+        scaling_config  = get_scaling_config()
 
-        outlier_columns = columns_config.get("outlier_columns", [])
-        nominal_columns = columns_config.get("nominal_columns", [])
-        outlier_method  = outlier_config.get("handling_method", "cap")
+        numeric_columns  = columns_config.get("numeric_columns", [])
+        nominal_columns  = columns_config.get("nominal_columns", [])
+        drop_columns     = columns_config.get("drop_columns", [])
+        outlier_columns  = columns_config.get("outlier_columns", [])
+        outlier_method   = outlier_config.get("handling_method", "cap")
+        scale_columns    = scaling_config.get("columns", [])
 
         # Step 1: Load raw data
         df = load_raw_data(spark, data_path)
 
-        # Step 2: Clean data
-        df = clean_data(df, target_column)
+        # Step 2: Clean data (dedup, type casting)
+        df = clean_data(df, target_column, numeric_columns)
 
-        # Step 3: Feature engineering
-        df = engineer_features(df)
+        # Step 3: Impute missing values
+        df = impute_missing_values(df, numeric_columns, nominal_columns)
 
-        # Step 4: Encode categorical features
-        df, encoding_model = encode_categorical_features(df, nominal_columns, target_column)
+        # Step 4: Feature engineering (timestamps, drop configured ID columns)
+        df = engineer_features(df, drop_columns)
 
-        # Step 5: Handle outliers
+        # Step 5: Outlier handling
         logger.info(f"\n{'='*60}")
         logger.info("STEP 5 - OUTLIER HANDLING")
         logger.info(f"{'='*60}")
@@ -179,17 +190,37 @@ def data_pipeline(
         else:
             logger.info("  No valid outlier columns found - skipping")
 
-        # Step 6: Train/test split
-        X_train, X_test, Y_train, Y_test = split_data(
+        # Step 6: Feature binning (replaces original column with '{col}Bins')
+        df, bin_columns = bin_features(df, binning_config)
+
+        # Step 7: Encode categorical features (nominal + bin columns)
+        df, encoding_model = encode_categorical_features(
+            df, nominal_columns, bin_columns, target_column
+        )
+
+        # Step 8: Split into train/test (full DataFrames, labels included)
+        train_df, test_df = split_data(
             df,
             target_column=target_column,
             test_size=test_size,
             random_state=random_state
         )
 
-        # Step 7: Save processed data
+        # Step 9: Scale numeric features (fit on train, apply to both)
+        # Binned columns have already replaced their originals, so only
+        # unbinned numeric columns remain in scale_columns
+        binned_originals = list(binning_config.keys())
+        remaining_scale_cols = [c for c in scale_columns if c not in binned_originals]
+        train_df, test_df = scale_features(train_df, test_df, remaining_scale_cols)
+
+        # Step 10: Separate features and labels
+        X_train, X_test, Y_train, Y_test = separate_features_labels(
+            train_df, test_df, target_column
+        )
+
+        # Step 11: Save processed data
         logger.info(f"\n{'='*60}")
-        logger.info("STEP 6 - SAVING PROCESSED DATA")
+        logger.info("STEP 10 - SAVING PROCESSED DATA")
         logger.info(f"{'='*60}")
         output_paths = save_processed_data(X_train, X_test, Y_train, Y_test, output_format)
 

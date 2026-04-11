@@ -91,3 +91,42 @@ pipeline:
   deployment_pipeline_name: "model_deployment_pipeline"
   inference_pipeline_name: "inference_pipeline"
   enable_cache: false
+
+training:
+  # TimeSeriesSplit cross-validation
+  time_series_split:
+    n_splits: 5
+
+  # Cost matrix for threshold optimisation
+  cost_matrix:
+    fp_cost: 5       # $ cost of flagging a legitimate transaction for review
+    fn_cost: 100     # $ cost of missing a fraudulent transaction
+
+  # Threshold sweep range (start, stop, step) — all inclusive on start, exclusive on stop
+  threshold_range:
+    start: 0.05
+    stop: 0.96
+    step: 0.01
+
+  # Minimum acceptable test AUC-ROC (CI quality gate)
+  min_auc_gate: 0.75
+
+  # ── Baseline model ──────────────────────────────────────────────────────
+  logistic_regression:
+    C: [0.01, 0.1, 1.0, 10.0]
+    max_iter: 1000
+    solver: "lbfgs"
+    class_weight: "balanced"
+
+  # ── Advanced model ──────────────────────────────────────────────────────
+  lightgbm:
+    n_estimators: 300
+    max_depth: 6
+    learning_rate: 0.05
+    num_leaves: 63
+    min_child_samples: 20
+    subsample: 0.8
+    colsample_bytree: 0.8
+    reg_alpha: 0.1
+    reg_lambda: 0.1
+    # scale_pos_weight is computed automatically as neg/pos ratio

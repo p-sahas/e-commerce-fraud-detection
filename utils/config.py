@@ -67,3 +67,7 @@ def get_binning_config():
 def get_scaling_config():
     config = load_config()
     return config.get('scaling', {})
+
+def get_training_config():
+    config = load_config()
+    return config.get('training', {})

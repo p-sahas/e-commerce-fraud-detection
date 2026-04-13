@@ -111,14 +111,14 @@ training:
   # Minimum acceptable test AUC-ROC (CI quality gate)
   min_auc_gate: 0.75
 
-  # ── Baseline model ──────────────────────────────────────────────────────
+  #  Baseline model 
   logistic_regression:
     C: [0.01, 0.1, 1.0, 10.0]
     max_iter: 1000
     solver: "lbfgs"
     class_weight: "balanced"
 
-  # ── Advanced model ──────────────────────────────────────────────────────
+  # Advanced model 
   lightgbm:
     n_estimators: 300
     max_depth: 6
@@ -130,3 +130,25 @@ training:
     reg_alpha: 0.1
     reg_lambda: 0.1
     # scale_pos_weight is computed automatically as neg/pos ratio
+
+streaming:
+  # Kafka connectivity
+  kafka_bootstrap_servers: "localhost:9092"
+  topic_purchases:   "purchases"
+  topic_fraud_scores: "fraud_scores"
+  consumer_group:    "fraud_inference_group"
+  analytics_group:   "fraud_analytics_group"
+
+  # Rolling window durations (seconds)
+  window_1h_secs:  3600
+  window_24h_secs: 86400
+
+  # Producer settings
+  raw_data_path: "data/raw/Fraud_Data.csv"
+  delay_secs: 0.05        # seconds between published events (throttle)
+  max_events: null        # null = replay entire file; set integer to cap
+
+  # Analytics sink
+  analytics_dir: "analytics"
+  sqlite_db:     "analytics/fraud_analytics.db"
+  alert_rate_threshold: 0.15    # flag an hour bucket if fraud rate exceeds 15%

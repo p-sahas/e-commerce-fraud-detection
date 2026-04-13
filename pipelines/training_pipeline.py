@@ -25,7 +25,7 @@ from typing import Dict, List, Optional
 import numpy as np
 import mlflow
 
-# ── Path bootstrap ────────────────────────────────────────────────────────────
+# Path bootstrap ────────────────────────────────────────────────────────────
 ROOT = os.path.abspath(os.path.join(os.path.dirname(__file__), ".."))
 sys.path.insert(0, os.path.join(ROOT, "src"))
 sys.path.insert(0, os.path.join(ROOT, "utils"))
@@ -44,14 +44,14 @@ from config import (
     get_mlflow_config,
 )
 
-# ── Logging ───────────────────────────────────────────────────────────────────
+# Logging ───────────────────────────────────────────────────────────────────
 logging.basicConfig(
     level=logging.INFO,
     format="%(asctime)s - %(levelname)s - %(message)s",
 )
 logger = logging.getLogger(__name__)
 
-# ── Training config block (read directly to avoid import loop) ────────────────
+# Training config block (read directly to avoid import loop) ────────────────
 import yaml as _yaml
 
 _CONFIG_FILE = os.path.join(ROOT, "config", "config.yaml")
@@ -67,7 +67,7 @@ def _load_training_config() -> Dict:
         return {}
 
 
-# ── Main pipeline function ─────────────────────────────────────────────────────
+# Main pipeline function ─────────────────────────────────────────────────────
 
 def training_pipeline(
     model_types: Optional[List[str]] = None,
@@ -102,7 +102,7 @@ def training_pipeline(
     logger.info(f"  Min AUC: {min_auc}")
     logger.info("=" * 80)
 
-    # ── Short-circuit if already trained ──────────────────────────────────────
+    # Short-circuit if already trained ──────────────────────────────────────
     meta_path = "artifacts/models/best_model_meta.json"
     if not force_retrain and os.path.exists(meta_path):
         import json
@@ -112,7 +112,7 @@ def training_pipeline(
         logger.info("  Pass force_retrain=True to re-train. Returning cached metadata.")
         return cached
 
-    # ── Load data ─────────────────────────────────────────────────────────────
+    # Load data ─────────────────────────────────────────────────────────────
     data_paths = get_data_paths()
     X_train, X_test, y_train, y_test = load_processed_data(data_paths)
 
@@ -123,7 +123,7 @@ def training_pipeline(
     X_tr_only = X_train[:-val_size]
     y_tr_only = y_train[:-val_size]
 
-    # ── MLflow setup ──────────────────────────────────────────────────────────
+    # MLflow setup ──────────────────────────────────────────────────────────
     mlflow_config = get_mlflow_config()
     tracking_uri  = mlflow_config.get("tracking_uri", "file:./mlruns")
     experiment_name = mlflow_config.get("experiment_name", "E-Commerce Fraud Detection")
@@ -133,7 +133,7 @@ def training_pipeline(
     mlflow.set_tracking_uri(tracking_uri)
     mlflow.set_experiment(experiment_name)
 
-    # ── Load training config ───────────────────────────────────────────────────
+    # Load training config ───────────────────────────────────────────────────
     training_config = _load_training_config()
     cost_matrix     = training_config.get("cost_matrix", {"fp_cost": 5.0, "fn_cost": 100.0})
     thresh_cfg      = training_config.get("threshold_range", {"start": 0.05, "stop": 0.96, "step": 0.01})
@@ -145,7 +145,7 @@ def training_pipeline(
 
     results = {}
 
-    # ── Train each model ──────────────────────────────────────────────────────
+    # Train each model ──────────────────────────────────────────────────────
     for model_type in model_types:
         run_name = f"{run_prefix}_{model_type}"
         logger.info(f"\n{'─' * 70}")
@@ -158,7 +158,7 @@ def training_pipeline(
             mlflow.log_param("test_samples",  len(X_test))
             mlflow.log_param("n_features",    X_train.shape[1])
 
-            # ── Train ─────────────────────────────────────────────────────────
+            # Train ─────────────────────────────────────────────────────────
             if model_type == "logistic_regression":
                 model = train_logistic_regression(
                     X_tr_only, y_tr_only, training_config, run
@@ -171,12 +171,12 @@ def training_pipeline(
                 logger.warning(f"  Unknown model type '{model_type}' — skipping.")
                 continue
 
-            # ── Threshold optimisation ─────────────────────────────────────────
+            # Threshold optimisation ─────────────────────────────────────────
             threshold, expected_cost = optimize_threshold(
                 model, X_val, y_val, cost_matrix, threshold_range
             )
 
-            # ── Test evaluation ────────────────────────────────────────────────
+            # Test evaluation ────────────────────────────────────────────────
             metrics = evaluate_model(
                 model, X_test, y_test,
                 threshold=threshold,
@@ -198,15 +198,15 @@ def training_pipeline(
     if not results:
         raise RuntimeError("No models were trained. Check model_types parameter.")
 
-    # ── Select best model by test AUC ─────────────────────────────────────────
+    # Select best model by test AUC ─────────────────────────────────────────
     best_type = max(results, key=lambda k: results[k]["metrics"]["auc_roc"])
     best      = results[best_type]
     logger.info(f"\n  Best model: {best_type}  (AUC={best['metrics']['auc_roc']:.4f})")
 
-    # ── AUC quality gate ──────────────────────────────────────────────────────
+    # AUC quality gate ──────────────────────────────────────────────────────
     assert_minimum_auc(best["metrics"], min_auc=min_auc)
 
-    # ── Register best model (inside a dedicated registration run) ─────────────
+    # Register best model (inside a dedicated registration run) ─────────────
     reg_run_name = f"{run_prefix}_{best_type}_registration"
     with mlflow.start_run(run_name=reg_run_name, tags=tags) as reg_run:
         # Re-log key metrics so this run is self-contained
@@ -224,7 +224,7 @@ def training_pipeline(
             mlflow_config=mlflow_config,
         )
 
-    # ── Summary ───────────────────────────────────────────────────────────────
+    # Summary ───────────────────────────────────────────────────────────────
     summary = {
         "best_model_type": best_type,
         "best_threshold":  best["threshold"],
@@ -248,7 +248,7 @@ def training_pipeline(
     return summary
 
 
-# ── CLI entry point ────────────────────────────────────────────────────────────
+# CLI entry point ────────────────────────────────────────────────────────────
 
 if __name__ == "__main__":
     import argparse

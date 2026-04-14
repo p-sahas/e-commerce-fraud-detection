@@ -35,6 +35,7 @@ PIP           := pip
 PYTEST        := pytest
 RUFF          := ruff
 BLACK         := black
+MLFLOW_COMPOSE := docker-compose.mlflow.yml
 
 RAW_DATA      := data/raw/Fraud_Data.csv
 PROCESSED_SENTINEL := artifacts/data/X_train.csv
@@ -51,7 +52,9 @@ MLFLOW_URI    := file:./mlruns
 # Phony targets — never treated as file names
 .PHONY: all setup data train train-lgbm train-lr \
         stream stream-demo producer inference analytics \
-        mlflow-ui test lint format \
+        mlflow-start mlflow-stop mlflow-restart mlflow-status \
+        mlflow-logs mlflow-ui mlflow-promote mlflow-compare mlflow-clean \
+        test lint format \
         clean clean-data clean-models \
         dirs check-data help
 
@@ -68,32 +71,41 @@ help:
 	@echo "  ╚══════════════════════════════════════════════════════════╝"
 	@echo ""
 	@echo "  Pipeline:"
-	@echo "    make all           Full pipeline (setup → data → train → test)"
-	@echo "    make setup         Install dependencies and create directories"
-	@echo "    make data          Run PySpark data pipeline"
-	@echo "    make train         Train LR + LightGBM, register best model"
-	@echo "    make train-lgbm    Train LightGBM only"
-	@echo "    make train-lr      Train Logistic Regression only"
+	@echo "    make all              Full pipeline (setup → data → train → test)"
+	@echo "    make setup            Install dependencies and create directories"
+	@echo "    make data             Run PySpark data pipeline"
+	@echo "    make train            Train LR + LightGBM, register best model"
+	@echo "    make train-lgbm       Train LightGBM only"
+	@echo "    make train-lr         Train Logistic Regression only"
 	@echo ""
 	@echo "  Streaming:"
-	@echo "    make stream-demo   Local demo (no Kafka needed)"
-	@echo "    make stream        Start all three Kafka services (threaded)"
-	@echo "    make producer      Kafka producer only"
-	@echo "    make inference     Kafka inference consumer only"
-	@echo "    make analytics     Kafka analytics consumer only"
+	@echo "    make stream-demo      Local demo (no Kafka needed)"
+	@echo "    make stream           Start all three Kafka services (threaded)"
+	@echo "    make producer         Kafka producer only"
+	@echo "    make inference        Kafka inference consumer only"
+	@echo "    make analytics        Kafka analytics consumer only"
 	@echo ""
-	@echo "  MLflow:"
-	@echo "    make mlflow-ui     Launch MLflow UI at http://localhost:$(MLFLOW_PORT)"
+	@echo "  MLflow Server:"
+	@echo "    make mlflow-start     Start tracking server (Docker)"
+	@echo "    make mlflow-stop      Stop tracking server"
+	@echo "    make mlflow-restart   Restart tracking server"
+	@echo "    make mlflow-status    Show server container status"
+	@echo "    make mlflow-logs      Tail server logs"
+	@echo "    make mlflow-ui        Open UI at http://localhost:$(MLFLOW_PORT)"
+	@echo "    make mlflow-promote   Promote Staging model → Production"
+	@echo "    make mlflow-compare   Print run comparison table"
+	@echo "    make mlflow-clean     Delete local mlruns/ directory"
 	@echo ""
 	@echo "  Quality:"
-	@echo "    make test          Run pytest suite"
-	@echo "    make lint          Lint with ruff + black --check"
-	@echo "    make format        Auto-format with black"
+	@echo "    make test             Run pytest suite with coverage"
+	@echo "    make test-fast        Run tests without coverage"
+	@echo "    make lint             Lint with ruff + black --check"
+	@echo "    make format           Auto-format with black"
 	@echo ""
 	@echo "  Cleanup:"
-	@echo "    make clean         Remove all generated artifacts"
-	@echo "    make clean-data    Remove processed data only"
-	@echo "    make clean-models  Remove model artifacts only"
+	@echo "    make clean            Remove all generated artifacts"
+	@echo "    make clean-data       Remove processed data only"
+	@echo "    make clean-models     Remove model artifacts only"
 	@echo ""
 
 # =============================================================================
@@ -217,12 +229,81 @@ analytics:
 	$(PYTHON) $(PIPELINES_DIR)/streaming_inference_pipeline.py analytics
 
 # =============================================================================
-# MLFLOW UI
+# MLFLOW SERVER (Docker-based tracking server)
 # =============================================================================
+
+## Start the MLflow Postgres-backed tracking server in the background
+mlflow-start:
+	@echo ""
+	@echo "  ╔══════════════════════════════════════════════════════════╗"
+	@echo "  ║          STARTING MLFLOW TRACKING SERVER                 ║"
+	@echo "  ╚══════════════════════════════════════════════════════════╝"
+	docker-compose -f $(MLFLOW_COMPOSE) up -d --remove-orphans
+	@echo ""
+	@echo "  Waiting for server to be healthy …"
+	@$(PYTHON) -c "\
+import urllib.request, time, sys; \
+for i in range(30): \
+    try: \
+        urllib.request.urlopen('http://localhost:5001/health', timeout=2); \
+        print('  ✓ MLflow UI ready at http://localhost:5001'); \
+        sys.exit(0) \
+    except Exception: \
+        time.sleep(2) \
+print('  ✗ Server did not respond in 60s — check: make mlflow-logs'); \
+sys.exit(1)"
+
+## Stop the MLflow tracking server
+mlflow-stop:
+	@echo "  ── Stopping MLflow tracking server ──────────────────────────"
+	docker-compose -f $(MLFLOW_COMPOSE) down
+	@echo "  ✓ MLflow server stopped"
+
+## Restart the server (stops then starts)
+mlflow-restart: mlflow-stop mlflow-start
+
+## Show container status
+mlflow-status:
+	@echo "  ── MLflow container status ──────────────────────────────────"
+	docker-compose -f $(MLFLOW_COMPOSE) ps
+
+## Tail server logs
+mlflow-logs:
+	docker-compose -f $(MLFLOW_COMPOSE) logs -f mlflow
+
+## Open the MLflow UI in the default browser
+## Falls back to just printing the URL if no browser is detected
 mlflow-ui:
 	@echo ""
-	@echo "  ── Launching MLflow UI at http://localhost:$(MLFLOW_PORT) ──────"
-	mlflow ui --backend-store-uri $(MLFLOW_URI) --port $(MLFLOW_PORT)
+	@echo "  ── MLflow UI → http://localhost:$(MLFLOW_PORT) ─────────────────"
+	@$(PYTHON) -c "\
+import webbrowser, sys; \
+opened = webbrowser.open('http://localhost:$(MLFLOW_PORT)', new=2); \
+print('  Browser opened.' if opened else '  Open manually: http://localhost:$(MLFLOW_PORT)')"
+
+## Promote the latest Staging model to Production
+## Override version with: make mlflow-promote MLFLOW_VERSION=3
+MLFLOW_VERSION ?=
+mlflow-promote:
+	@echo ""
+	@echo "  ── Promoting model to Production ────────────────────────────"
+	$(PYTHON) src/mlflow_utils.py promote --stage Production \
+		$(if $(MLFLOW_VERSION),--version $(MLFLOW_VERSION),)
+	@echo "  ✓ Promotion complete"
+
+## Print a run comparison table for the experiment
+mlflow-compare:
+	@echo ""
+	@echo "  ── Comparing MLflow runs ────────────────────────────────────"
+	$(PYTHON) src/mlflow_utils.py compare
+
+## Delete the local mlruns/ directory (only for file-based tracking)
+mlflow-clean:
+	@echo "  ── Removing local mlruns/ ───────────────────────────────────"
+	$(PYTHON) -c "\
+import shutil; \
+shutil.rmtree('mlruns', ignore_errors=True); \
+print('  ✓ mlruns/ removed')"
 
 # =============================================================================
 # TESTING & QUALITY

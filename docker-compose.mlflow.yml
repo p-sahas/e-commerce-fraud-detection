@@ -1,0 +1,105 @@
+# =============================================================================
+# docker-compose.mlflow.yml
+# Standalone MLflow Tracking Server with PostgreSQL backend
+#
+# Usage:
+#   Start  : docker-compose -f docker-compose.mlflow.yml up -d
+#   Stop   : docker-compose -f docker-compose.mlflow.yml down
+#   Logs   : docker-compose -f docker-compose.mlflow.yml logs -f mlflow
+#   UI     : http://localhost:5001
+#
+# Or via Makefile:
+#   make mlflow-start
+#   make mlflow-stop
+#   make mlflow-ui
+#
+# Override any value by exporting the variable before running:
+#   export MLFLOW_ARTIFACT_ROOT=s3://my-bucket/mlflow-artifacts
+# =============================================================================
+
+version: "3.9"
+
+# Shared network
+networks:
+  mlflow-net:
+    driver: bridge
+
+# Named volumes for persistence
+volumes:
+  mlflow-db-data:
+    driver: local
+  mlflow-artifacts:
+    driver: local
+
+# Services
+services:
+
+  # PostgreSQL backend for MLflow metadata
+  mlflow-db:
+    image: postgres:15-alpine
+    container_name: mlflow-db
+    restart: unless-stopped
+    networks:
+      - mlflow-net
+    environment:
+      POSTGRES_USER:     ${MLFLOW_DB_USER:-mlflow}
+      POSTGRES_PASSWORD: ${MLFLOW_DB_PASSWORD:-mlflow}
+      POSTGRES_DB:       ${MLFLOW_DB_NAME:-mlflow}
+    volumes:
+      - mlflow-db-data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ${MLFLOW_DB_USER:-mlflow}"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+    ports:
+      - "5433:5432"     # Exposed on 5433 to avoid clashing with a local Postgres
+
+  # MLflow tracking server
+  mlflow:
+    image: python:3.11-slim
+    container_name: mlflow-tracking
+    restart: unless-stopped
+    networks:
+      - mlflow-net
+    depends_on:
+      mlflow-db:
+        condition: service_healthy
+    environment:
+      # Backend store — PostgreSQL
+      MLFLOW_BACKEND_STORE_URI: >-
+        postgresql://${MLFLOW_DB_USER:-mlflow}:${MLFLOW_DB_PASSWORD:-mlflow}@mlflow-db:5432/${MLFLOW_DB_NAME:-mlflow}
+
+      # Artifact store — local volume by default; set env var to use S3
+      # e.g. MLFLOW_ARTIFACT_ROOT=s3://my-bucket/mlflow-artifacts
+      MLFLOW_ARTIFACT_ROOT: ${MLFLOW_ARTIFACT_ROOT:-/mlflow/artifacts}
+
+      # AWS credentials (only needed if MLFLOW_ARTIFACT_ROOT points to S3)
+      AWS_ACCESS_KEY_ID:     ${AWS_ACCESS_KEY:-}
+      AWS_SECRET_ACCESS_KEY: ${SECTRET_ACCESS_KEY:-}
+      AWS_DEFAULT_REGION:    ${AWS_REGION:-ap-south-1}
+
+      # Server config
+      MLFLOW_HOST: "0.0.0.0"
+      MLFLOW_PORT: "5001"
+
+    volumes:
+      - mlflow-artifacts:/mlflow/artifacts
+    ports:
+      - "5001:5001"
+    command: >
+      bash -c "
+        pip install --quiet mlflow psycopg2-binary boto3 &&
+        mlflow server
+          --backend-store-uri postgresql://${MLFLOW_DB_USER:-mlflow}:${MLFLOW_DB_PASSWORD:-mlflow}@mlflow-db:5432/${MLFLOW_DB_NAME:-mlflow}
+          --default-artifact-root ${MLFLOW_ARTIFACT_ROOT:-/mlflow/artifacts}
+          --host 0.0.0.0
+          --port 5001
+          --serve-artifacts
+      "
+    healthcheck:
+      test: ["CMD-SHELL", "curl -sf http://localhost:5001/health || exit 1"]
+      interval: 15s
+      timeout: 10s
+      retries: 6
+      start_period: 30s

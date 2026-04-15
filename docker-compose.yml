@@ -1,0 +1,431 @@
+# =============================================================================
+# docker-compose.yml — E-Commerce Fraud Detection Full Stack
+# =============================================================================
+#
+# Services:
+#   Infrastructure:
+#     zookeeper         Apache Zookeeper (Kafka coordination)
+#     kafka             Apache Kafka broker (port 9092)
+#     kafka-ui          Kafka UI dashboard (port 8080)
+#     kafka-init        One-shot topic creation (purchases, fraud_scores)
+#
+#   ML Platform:
+#     mlflow-db         PostgreSQL for MLflow metadata (port 5433)
+#     mlflow            MLflow tracking server (port 5001)
+#
+#   Airflow:
+#     airflow-db        PostgreSQL for Airflow metadata (port 5434)
+#     airflow-init      One-shot DB init + admin user creation
+#     airflow-webserver Airflow UI (port 8081)
+#     airflow-scheduler Airflow scheduler
+#
+#   Streaming Services:
+#     producer          Transaction event producer (reads Fraud_Data.csv)
+#     inference         Fraud inference consumer
+#     analytics         Analytics/BI consumer
+#
+# Usage:
+#   Start all      : docker-compose up -d
+#   Start infra only: docker-compose up -d zookeeper kafka mlflow-db mlflow
+#   Stop all       : docker-compose down
+#   View logs      : docker-compose logs -f <service>
+#
+# Or via Makefile:
+#   make infra-start   — Zookeeper + Kafka + MLflow only
+#   make stack-start   — Full stack including Airflow
+#   make stack-stop    — Stop everything
+# =============================================================================
+
+version: "3.9"
+
+# ── Shared network ─────────────────────────────────────────────────────────────
+networks:
+  fraud-net:
+    driver: bridge
+
+# ── Named volumes ──────────────────────────────────────────────────────────────
+volumes:
+  zookeeper-data:
+  zookeeper-logs:
+  kafka-data:
+  mlflow-db-data:
+  mlflow-artifacts:
+  airflow-db-data:
+  airflow-logs:
+
+# ── Common environment for streaming services ──────────────────────────────────
+x-streaming-env: &streaming-env
+  KAFKA_BOOTSTRAP_SERVERS: kafka:9092
+  MLFLOW_TRACKING_URI:     http://mlflow:5001
+  REPO_ROOT:               /app
+  PYTHONUNBUFFERED:        "1"
+  PYTHONDONTWRITEBYTECODE: "1"
+
+# ── Common environment for Airflow services ────────────────────────────────────
+x-airflow-env: &airflow-env
+  AIRFLOW__CORE__EXECUTOR:                    LocalExecutor
+  AIRFLOW__DATABASE__SQL_ALCHEMY_CONN:        postgresql+psycopg2://airflow:airflow@airflow-db:5432/airflow
+  AIRFLOW__CORE__FERNET_KEY:                  "ZmDfcTF7_60GrrY167zsiPd67pEvs0aGOv2oasOM1Pg="
+  AIRFLOW__CORE__DAGS_ARE_PAUSED_AT_CREATION: "false"
+  AIRFLOW__CORE__LOAD_EXAMPLES:               "false"
+  AIRFLOW__WEBSERVER__EXPOSE_CONFIG:          "true"
+  AIRFLOW__WEBSERVER__SECRET_KEY:             "fraud-detection-secret"
+  REPO_ROOT:                                  /opt/airflow
+  MLFLOW_TRACKING_URI:                        http://mlflow:5001
+  AIRFLOW_UID:                                "${AIRFLOW_UID:-50000}"
+
+# =============================================================================
+# SERVICES
+# =============================================================================
+services:
+
+  # ============================================================================
+  # KAFKA INFRASTRUCTURE
+  # ============================================================================
+
+  zookeeper:
+    image: confluentinc/cp-zookeeper:7.6.0
+    container_name: zookeeper
+    restart: unless-stopped
+    networks: [fraud-net]
+    environment:
+      ZOOKEEPER_CLIENT_PORT: 2181
+      ZOOKEEPER_TICK_TIME:   2000
+      ZOOKEEPER_DATA_DIR:    /var/lib/zookeeper/data
+      ZOOKEEPER_LOG_DIR:     /var/lib/zookeeper/log
+    volumes:
+      - zookeeper-data:/var/lib/zookeeper/data
+      - zookeeper-logs:/var/lib/zookeeper/log
+    healthcheck:
+      test: ["CMD-SHELL", "echo ruok | nc localhost 2181 | grep imok"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
+  kafka:
+    image: confluentinc/cp-kafka:7.6.0
+    container_name: kafka
+    restart: unless-stopped
+    networks: [fraud-net]
+    depends_on:
+      zookeeper:
+        condition: service_healthy
+    environment:
+      KAFKA_BROKER_ID:                        1
+      KAFKA_ZOOKEEPER_CONNECT:                zookeeper:2181
+      # Internal Docker DNS listener + external localhost listener
+      KAFKA_LISTENERS:                        INTERNAL://0.0.0.0:9092,EXTERNAL://0.0.0.0:9093
+      KAFKA_ADVERTISED_LISTENERS:             INTERNAL://kafka:9092,EXTERNAL://localhost:9093
+      KAFKA_LISTENER_SECURITY_PROTOCOL_MAP:   INTERNAL:PLAINTEXT,EXTERNAL:PLAINTEXT
+      KAFKA_INTER_BROKER_LISTENER_NAME:       INTERNAL
+      KAFKA_OFFSETS_TOPIC_REPLICATION_FACTOR: 1
+      KAFKA_AUTO_CREATE_TOPICS_ENABLE:        "false"
+      KAFKA_LOG_RETENTION_HOURS:              168      # 7 days
+      KAFKA_LOG_SEGMENT_BYTES:                1073741824
+    volumes:
+      - kafka-data:/var/lib/kafka/data
+    ports:
+      - "9093:9093"    # External listener for host-machine clients
+    healthcheck:
+      test: ["CMD-SHELL", "kafka-broker-api-versions --bootstrap-server localhost:9092"]
+      interval: 15s
+      timeout: 10s
+      retries: 6
+      start_period: 30s
+
+  # ── One-shot topic creation ─────────────────────────────────────────────────
+  kafka-init:
+    image: confluentinc/cp-kafka:7.6.0
+    container_name: kafka-init
+    networks: [fraud-net]
+    depends_on:
+      kafka:
+        condition: service_healthy
+    entrypoint: ["/bin/bash", "-c"]
+    command: |
+      "
+      echo 'Creating Kafka topics …'
+      kafka-topics --bootstrap-server kafka:9092 --create --if-not-exists \
+        --topic purchases --partitions 3 --replication-factor 1 \
+        --config retention.ms=604800000
+
+      kafka-topics --bootstrap-server kafka:9092 --create --if-not-exists \
+        --topic fraud_scores --partitions 3 --replication-factor 1 \
+        --config retention.ms=604800000
+
+      kafka-topics --bootstrap-server kafka:9092 --create --if-not-exists \
+        --topic fraud_alerts --partitions 1 --replication-factor 1 \
+        --config retention.ms=2592000000
+
+      echo 'Topics created:'
+      kafka-topics --bootstrap-server kafka:9092 --list
+      "
+    restart: on-failure
+
+  # ── Kafka UI dashboard ──────────────────────────────────────────────────────
+  kafka-ui:
+    image: provectuslabs/kafka-ui:latest
+    container_name: kafka-ui
+    restart: unless-stopped
+    networks: [fraud-net]
+    depends_on:
+      kafka:
+        condition: service_healthy
+    environment:
+      KAFKA_CLUSTERS_0_NAME:            local
+      KAFKA_CLUSTERS_0_BOOTSTRAPSERVERS: kafka:9092
+      KAFKA_CLUSTERS_0_ZOOKEEPER:       zookeeper:2181
+    ports:
+      - "8080:8080"
+
+  # ============================================================================
+  # MLFLOW TRACKING SERVER
+  # ============================================================================
+
+  mlflow-db:
+    image: postgres:15-alpine
+    container_name: mlflow-db
+    restart: unless-stopped
+    networks: [fraud-net]
+    environment:
+      POSTGRES_USER:     ${MLFLOW_DB_USER:-mlflow}
+      POSTGRES_PASSWORD: ${MLFLOW_DB_PASSWORD:-mlflow}
+      POSTGRES_DB:       ${MLFLOW_DB_NAME:-mlflow}
+    volumes:
+      - mlflow-db-data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ${MLFLOW_DB_USER:-mlflow}"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+    ports:
+      - "5433:5432"
+
+  mlflow:
+    image: python:3.11-slim
+    container_name: mlflow-tracking
+    restart: unless-stopped
+    networks: [fraud-net]
+    depends_on:
+      mlflow-db:
+        condition: service_healthy
+    environment:
+      AWS_ACCESS_KEY_ID:     ${AWS_ACCESS_KEY:-}
+      AWS_SECRET_ACCESS_KEY: ${SECTRET_ACCESS_KEY:-}
+      AWS_DEFAULT_REGION:    ${AWS_REGION:-ap-south-1}
+      MLFLOW_ARTIFACT_ROOT:  ${MLFLOW_ARTIFACT_ROOT:-/mlflow/artifacts}
+    volumes:
+      - mlflow-artifacts:/mlflow/artifacts
+    ports:
+      - "5001:5001"
+    command: >
+      bash -c "
+        pip install --quiet mlflow psycopg2-binary boto3 &&
+        mlflow server
+          --backend-store-uri postgresql://${MLFLOW_DB_USER:-mlflow}:${MLFLOW_DB_PASSWORD:-mlflow}@mlflow-db:5432/${MLFLOW_DB_NAME:-mlflow}
+          --default-artifact-root ${MLFLOW_ARTIFACT_ROOT:-/mlflow/artifacts}
+          --host 0.0.0.0
+          --port 5001
+          --serve-artifacts
+      "
+    healthcheck:
+      test: ["CMD-SHELL", "curl -sf http://localhost:5001/health || exit 1"]
+      interval: 15s
+      timeout: 10s
+      retries: 6
+      start_period: 45s
+
+  # ============================================================================
+  # APACHE AIRFLOW
+  # ============================================================================
+
+  airflow-db:
+    image: postgres:15-alpine
+    container_name: airflow-db
+    restart: unless-stopped
+    networks: [fraud-net]
+    environment:
+      POSTGRES_USER:     airflow
+      POSTGRES_PASSWORD: airflow
+      POSTGRES_DB:       airflow
+    volumes:
+      - airflow-db-data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U airflow"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+    ports:
+      - "5434:5432"
+
+  # ── One-shot Airflow DB init ────────────────────────────────────────────────
+  airflow-init:
+    image: apache/airflow:2.9.1
+    container_name: airflow-init
+    networks: [fraud-net]
+    depends_on:
+      airflow-db:
+        condition: service_healthy
+    environment:
+      <<: *airflow-env
+    volumes:
+      - ./dags:/opt/airflow/dags
+      - ./pipelines:/opt/airflow/pipelines
+      - ./src:/opt/airflow/src
+      - ./utils:/opt/airflow/utils
+      - ./config:/opt/airflow/config
+      - ./data:/opt/airflow/data
+      - ./artifacts:/opt/airflow/artifacts
+      - airflow-logs:/opt/airflow/logs
+      - ./.env:/opt/airflow/.env
+    entrypoint: ["/bin/bash", "-c"]
+    command: |
+      "
+      pip install --quiet apache-airflow-providers-common-sql mlflow lightgbm scikit-learn pyspark
+      airflow db upgrade
+      airflow users create \
+        --username admin \
+        --password admin \
+        --firstname Fraud \
+        --lastname Detection \
+        --role Admin \
+        --email admin@fraud-detection.local || true
+      echo 'Airflow initialised.'
+      "
+    restart: on-failure
+
+  airflow-webserver:
+    image: apache/airflow:2.9.1
+    container_name: airflow-webserver
+    restart: unless-stopped
+    networks: [fraud-net]
+    depends_on:
+      airflow-db:
+        condition: service_healthy
+      airflow-init:
+        condition: service_completed_successfully
+    environment:
+      <<: *airflow-env
+    volumes:
+      - ./dags:/opt/airflow/dags
+      - ./pipelines:/opt/airflow/pipelines
+      - ./src:/opt/airflow/src
+      - ./utils:/opt/airflow/utils
+      - ./config:/opt/airflow/config
+      - ./data:/opt/airflow/data
+      - ./artifacts:/opt/airflow/artifacts
+      - airflow-logs:/opt/airflow/logs
+      - ./.env:/opt/airflow/.env
+    ports:
+      - "8081:8080"
+    command: webserver
+    healthcheck:
+      test: ["CMD-SHELL", "curl -sf http://localhost:8080/health || exit 1"]
+      interval: 30s
+      timeout: 10s
+      retries: 5
+      start_period: 60s
+
+  airflow-scheduler:
+    image: apache/airflow:2.9.1
+    container_name: airflow-scheduler
+    restart: unless-stopped
+    networks: [fraud-net]
+    depends_on:
+      airflow-db:
+        condition: service_healthy
+      airflow-init:
+        condition: service_completed_successfully
+    environment:
+      <<: *airflow-env
+    volumes:
+      - ./dags:/opt/airflow/dags
+      - ./pipelines:/opt/airflow/pipelines
+      - ./src:/opt/airflow/src
+      - ./utils:/opt/airflow/utils
+      - ./config:/opt/airflow/config
+      - ./data:/opt/airflow/data
+      - ./artifacts:/opt/airflow/artifacts
+      - airflow-logs:/opt/airflow/logs
+      - ./.env:/opt/airflow/.env
+    command: scheduler
+    healthcheck:
+      test: ["CMD-SHELL", "airflow jobs check --job-type SchedulerJob --hostname $(hostname)"]
+      interval: 30s
+      timeout: 10s
+      retries: 5
+      start_period: 30s
+
+  # ============================================================================
+  # STREAMING SERVICES  (profile: streaming)
+  # Build from local source — only start with: docker-compose --profile streaming up -d
+  # ============================================================================
+
+  producer:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    container_name: fraud-producer
+    restart: unless-stopped
+    networks: [fraud-net]
+    profiles: [streaming]
+    depends_on:
+      kafka:
+        condition: service_healthy
+      kafka-init:
+        condition: service_completed_successfully
+    environment:
+      <<: *streaming-env
+      STREAMING_DELAY_SECS: "0.05"
+    volumes:
+      - ./data:/app/data:ro
+      - ./artifacts:/app/artifacts:ro
+      - ./config:/app/config:ro
+    command: ["python", "pipelines/streaming_inference_pipeline.py", "producer"]
+
+  inference:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    container_name: fraud-inference
+    restart: unless-stopped
+    networks: [fraud-net]
+    profiles: [streaming]
+    depends_on:
+      kafka:
+        condition: service_healthy
+      kafka-init:
+        condition: service_completed_successfully
+      mlflow:
+        condition: service_healthy
+    environment:
+      <<: *streaming-env
+    volumes:
+      - ./data:/app/data:ro
+      - ./artifacts:/app/artifacts
+      - ./config:/app/config:ro
+      - ./src:/app/src:ro
+      - ./utils:/app/utils:ro
+    command: ["python", "pipelines/streaming_inference_pipeline.py", "inference"]
+
+  analytics:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    container_name: fraud-analytics
+    restart: unless-stopped
+    networks: [fraud-net]
+    profiles: [streaming]
+    depends_on:
+      kafka:
+        condition: service_healthy
+      kafka-init:
+        condition: service_completed_successfully
+    environment:
+      <<: *streaming-env
+    volumes:
+      - ./data:/app/data:ro
+      - ./artifacts:/app/artifacts
+      - ./analytics:/app/analytics
+      - ./config:/app/config:ro
+    command: ["python", "pipelines/streaming_inference_pipeline.py", "analytics"]

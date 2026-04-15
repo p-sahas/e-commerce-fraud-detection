@@ -1,11 +1,11 @@
 """
-DAG 1 — Data Pipeline
+DAG 1 - Data Pipeline
 ======================
 Orchestrates the full data ingestion and preprocessing workflow.
 
 Steps:
-  ingest          → validate schema      → quality_report
-  → curated_export (saves processed CSVs to artifacts/data/)
+  ingest          -> validate schema      -> quality_report
+  -> curated_export (saves processed CSVs to artifacts/data/)
 
 Schedule: Daily at 02:00 UTC
 """
@@ -22,13 +22,13 @@ from airflow.operators.python import PythonOperator
 from airflow.operators.bash import BashOperator
 from airflow.sensors.filesystem import FileSensor
 
-# ── Paths ──────────────────────────────────────────────────────────────────────
+# Paths
 REPO_ROOT   = os.environ.get("REPO_ROOT", "/opt/airflow")
 RAW_DATA    = os.path.join(REPO_ROOT, "data", "raw", "Fraud_Data.csv")
 CURATED_DIR = os.path.join(REPO_ROOT, "artifacts", "data")
 REPORT_PATH = os.path.join(REPO_ROOT, "artifacts", "reports", "data_quality_report.json")
 
-# ── Default args ───────────────────────────────────────────────────────────────
+# Default args
 default_args = {
     "owner":            "ml_engineering",
     "depends_on_past":  False,
@@ -39,10 +39,10 @@ default_args = {
     "email_on_retry":   False,
 }
 
-# ── DAG ────────────────────────────────────────────────────────────────────────
+# DAG
 with DAG(
     dag_id="data_pipeline_dag",
-    description="Ingest → Validate → Quality Report → Curated Export",
+    description="Ingest -> Validate -> Quality Report -> Curated Export",
     schedule_interval="0 2 * * *",   # daily at 02:00 UTC
     default_args=default_args,
     catchup=False,
@@ -50,7 +50,7 @@ with DAG(
     tags=["data", "fraud-detection", "etl"],
 ) as dag:
 
-    # ── Task 1: Wait for raw data file ─────────────────────────────────────────
+    # Task 1: Wait for raw data file
     wait_for_raw_data = FileSensor(
         task_id="wait_for_raw_data",
         filepath=RAW_DATA,
@@ -64,7 +64,7 @@ with DAG(
         """,
     )
 
-    # ── Task 2: Schema validation ───────────────────────────────────────────────
+    # Task 2: Schema validation
     def _schema_validate(**context) -> dict:
         """
         Validate raw CSV against the expected schema:
@@ -141,7 +141,7 @@ with DAG(
         """,
     )
 
-    # ── Task 3: Quality report ──────────────────────────────────────────────────
+    # Task 3: Quality report
     def _quality_report(**context) -> dict:
         """
         Compute a comprehensive data quality report:
@@ -200,7 +200,7 @@ with DAG(
             json.dump(report, fh, indent=2)
 
         context["ti"].xcom_push(key="quality_report", value=report)
-        print(f"Quality report saved → {REPORT_PATH}")
+        print(f"Quality report saved -> {REPORT_PATH}")
         print(f"  Rows: {total_rows:,}  |  Fraud ratio: {fraud_ratio:.2%}")
         print(f"  Missing values: {total_missing:,}  |  Outliers: {outlier_counts}")
         return report
@@ -216,7 +216,7 @@ with DAG(
         """,
     )
 
-    # ── Task 4: Curated export (run PySpark data pipeline) ─────────────────────
+    # Task 4: Curated export (run PySpark data pipeline)
     curated_export = BashOperator(
         task_id="curated_export",
         bash_command=(
@@ -233,5 +233,5 @@ with DAG(
         """,
     )
 
-    # ── Dependencies ───────────────────────────────────────────────────────────
+    # Dependencies
     wait_for_raw_data >> schema_validate >> quality_report >> curated_export

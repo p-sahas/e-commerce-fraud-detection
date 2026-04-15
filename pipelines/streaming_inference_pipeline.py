@@ -7,7 +7,7 @@ Three coordinated services that run as independent processes (or containers):
   ┌─────────────────────────────────────────────────────────────────────┐
   │  Producer              Inference Consumer       Analytics Consumer  │
   │  ───────────        ────────────────      ──────────────── │
-  │  Reads raw CSV    →    Consumes 'purchases'  →  Consumes            │
+  │  Reads raw CSV    ->    Consumes 'purchases'  ->  Consumes            │
   │  sorted by             Computes rolling            'fraud_scores'   │
   │  purchase_time         features (1h / 24h)     Aggregates hourly    │
   │  Publishes to          Scores with MLflow        alert rates        │
@@ -273,7 +273,7 @@ class RollingFeatureStore:
         i_cnt_1h,  i_sum_1h  = _window_stats(i_events, WINDOW_1H)
         i_cnt_24h, i_sum_24h = _window_stats(i_events, WINDOW_24H)
 
-        # Rarity: 1 / (1 + count) — infrequent device/IP → higher score
+        # Rarity: 1 / (1 + count) — infrequent device/IP -> higher score
         d_rarity = 1.0 / (1.0 + d_cnt_24h)
         i_rarity = 1.0 / (1.0 + i_cnt_24h)
 
@@ -335,7 +335,7 @@ class TransactionProducer:
                 linger_ms=10,
                 batch_size=16_384,
             )
-            logger.info(f"Producer connected → {KAFKA_BOOTSTRAP}  topic={TOPIC_PURCHASES}")
+            logger.info(f"Producer connected -> {KAFKA_BOOTSTRAP}  topic={TOPIC_PURCHASES}")
             return True
         except NoBrokersAvailable:
             logger.error(f"No Kafka brokers available at '{KAFKA_BOOTSTRAP}'. "
@@ -752,7 +752,7 @@ class AnalyticsConsumer:
                 writer = csv.DictWriter(fh, fieldnames=cols, extrasaction="ignore")
                 writer.writeheader()
                 writer.writerows(self._all_scored)
-            logger.info(f"[analytics] CSV flushed → {csv_path}  ({len(self._all_scored):,} rows)")
+            logger.info(f"[analytics] CSV flushed -> {csv_path}  ({len(self._all_scored):,} rows)")
         except Exception as exc:
             logger.error(f"[analytics] CSV flush error: {exc}")
 
@@ -811,7 +811,7 @@ class AnalyticsConsumer:
 
             con.commit()
             con.close()
-            logger.info(f"[analytics] SQLite flushed → {SQLITE_DB_PATH}  "
+            logger.info(f"[analytics] SQLite flushed -> {SQLITE_DB_PATH}  "
                         f"({len(self._windows)} hour buckets)")
         except Exception as exc:
             logger.error(f"[analytics] SQLite flush error: {exc}")

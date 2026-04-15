@@ -9,7 +9,7 @@
 #
 # Usage:
 #   make help          — show this message
-#   make all           — full pipeline: setup → data → train → test
+#   make all           — full pipeline: setup -> data -> train -> test
 #   make setup         — create directories and install Python deps
 #   make data          — run PySpark data pipeline
 #   make train         — train models and register best in MLflow
@@ -76,7 +76,7 @@ help:
 	@echo "  ╚══════════════════════════════════════════════════════════╝"
 	@echo ""
 	@echo "  Pipeline:"
-	@echo "    make all              Full pipeline (setup → data → train → test)"
+	@echo "    make all              Full pipeline (setup -> data -> train -> test)"
 	@echo "    make setup            Install dependencies and create directories"
 	@echo "    make data             Run PySpark data pipeline"
 	@echo "    make train            Train LR + LightGBM, register best model"
@@ -118,7 +118,7 @@ help:
 	@echo "    make mlflow-status    Show server container status"
 	@echo "    make mlflow-logs      Tail server logs"
 	@echo "    make mlflow-ui        Open UI at http://localhost:$(MLFLOW_PORT)"
-	@echo "    make mlflow-promote   Promote Staging model → Production"
+	@echo "    make mlflow-promote   Promote Staging model -> Production"
 	@echo "    make mlflow-compare   Print run comparison table"
 	@echo "    make mlflow-clean     Delete local mlruns/ directory"
 	@echo ""
@@ -170,7 +170,7 @@ data: dirs check-data
 	@echo "  ║            RUNNING DATA PIPELINE                         ║"
 	@echo "  ╚══════════════════════════════════════════════════════════╝"
 	$(PYTHON) $(PIPELINES_DIR)/data_pipeline.py
-	@echo "  ✓ Data pipeline complete → artifacts/data/"
+	@echo "  ✓ Data pipeline complete -> artifacts/data/"
 
 # Re-run even if output already exists
 data-force: dirs check-data
@@ -194,7 +194,7 @@ train: $(PROCESSED_SENTINEL)
 	$(PYTHON) $(PIPELINES_DIR)/training_pipeline.py \
 		--models logistic_regression lightgbm \
 		--min-auc 0.75
-	@echo "  ✓ Training complete → artifacts/models/best_model_meta.json"
+	@echo "  ✓ Training complete -> artifacts/models/best_model_meta.json"
 
 train-lgbm: $(PROCESSED_SENTINEL)
 	@echo "  ── Training LightGBM only ───────────────────────────────────"
@@ -232,7 +232,7 @@ stream-demo:
 	@echo "  ║        STREAMING DEMO  (no Kafka required)               ║"
 	@echo "  ╚══════════════════════════════════════════════════════════╝"
 	$(PYTHON) $(PIPELINES_DIR)/streaming_inference_pipeline.py demo 500
-	@echo "  ✓ Demo complete → analytics/"
+	@echo "  ✓ Demo complete -> analytics/"
 
 stream:
 	@echo ""
@@ -301,7 +301,7 @@ mlflow-logs:
 ## Falls back to just printing the URL if no browser is detected
 mlflow-ui:
 	@echo ""
-	@echo "  ── MLflow UI → http://localhost:$(MLFLOW_PORT) ─────────────────"
+	@echo "  ── MLflow UI -> http://localhost:$(MLFLOW_PORT) ─────────────────"
 	@$(PYTHON) -c "\
 import webbrowser, sys; \
 opened = webbrowser.open('http://localhost:$(MLFLOW_PORT)', new=2); \
@@ -346,7 +346,7 @@ test:
 		--cov=pipelines \
 		--cov-report=term-missing \
 		--cov-report=html:artifacts/coverage_html
-	@echo "  ✓ Tests complete — coverage report → artifacts/coverage_html/"
+	@echo "  ✓ Tests complete — coverage report -> artifacts/coverage_html/"
 
 test-fast:
 	@echo "  ── Running tests (no coverage) ─────────────────────────────"
@@ -375,10 +375,10 @@ all: setup data train test
 	@echo "  ╚══════════════════════════════════════════════════════════╝"
 	@echo ""
 	@echo "  Artifacts:"
-	@echo "    Processed data  → artifacts/data/"
-	@echo "    Trained models  → artifacts/models/"
-	@echo "    Evaluation plots→ artifacts/plots/"
-	@echo "    MLflow runs     → mlruns/"
+	@echo "    Processed data  -> artifacts/data/"
+	@echo "    Trained models  -> artifacts/models/"
+	@echo "    Evaluation plots-> artifacts/plots/"
+	@echo "    MLflow runs     -> mlruns/"
 	@echo ""
 	@echo "  Next steps:"
 	@echo "    make mlflow-ui      View experiment results"
@@ -426,8 +426,8 @@ kafka-start:
 	@echo "  ║            STARTING KAFKA INFRASTRUCTURE                 ║"
 	@echo "  ╚══════════════════════════════════════════════════════════╝"
 	docker-compose -f $(COMPOSE) up -d zookeeper kafka kafka-init kafka-ui
-	@echo "  Kafka UI  → http://localhost:8080"
-	@echo "  Bootstrap → localhost:9093  (from host)"
+	@echo "  Kafka UI  -> http://localhost:8080"
+	@echo "  Bootstrap -> localhost:9093  (from host)"
 
 ## Stop Kafka + Zookeeper
 kafka-stop:
@@ -467,7 +467,7 @@ airflow-start:
 	@echo "  ║              STARTING AIRFLOW                            ║"
 	@echo "  ╚══════════════════════════════════════════════════════════╝"
 	docker-compose -f $(COMPOSE) up -d airflow-db airflow-webserver airflow-scheduler
-	@echo "  Airflow UI → http://localhost:8081  (admin / admin)"
+	@echo "  Airflow UI -> http://localhost:8081  (admin / admin)"
 
 ## Stop Airflow services
 airflow-stop:
@@ -489,7 +489,7 @@ airflow-ui:
 	@$(PYTHON) -c "\
 import webbrowser; \
 opened = webbrowser.open('http://localhost:8081', new=2); \
-print('  Browser opened → http://localhost:8081' if opened \
+print('  Browser opened -> http://localhost:8081' if opened \
       else '  Open manually: http://localhost:8081')"
 
 # =============================================================================
@@ -512,8 +512,8 @@ infra-start:
 		zookeeper kafka kafka-init kafka-ui \
 		mlflow-db mlflow
 	@echo ""
-	@echo "  Kafka UI  → http://localhost:8080"
-	@echo "  MLflow UI → http://localhost:5001"
+	@echo "  Kafka UI  -> http://localhost:8080"
+	@echo "  MLflow UI -> http://localhost:5001"
 
 ## Start the full stack: infra + Airflow (no streaming services)
 stack-start:
@@ -527,9 +527,9 @@ stack-start:
 		airflow-db airflow-init airflow-webserver airflow-scheduler
 	@echo ""
 	@echo "  Services:"
-	@echo "    Kafka UI   → http://localhost:8080"
-	@echo "    MLflow UI  → http://localhost:5001"
-	@echo "    Airflow UI → http://localhost:8081  (admin / admin)"
+	@echo "    Kafka UI   -> http://localhost:8080"
+	@echo "    MLflow UI  -> http://localhost:5001"
+	@echo "    Airflow UI -> http://localhost:8081  (admin / admin)"
 
 ## Start streaming services on top of the full stack
 ## Requires: make stack-start + make train (to have a model)

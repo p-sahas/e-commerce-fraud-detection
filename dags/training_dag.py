@@ -5,8 +5,8 @@ Orchestrates the end-to-end model training workflow triggered after the
 data pipeline DAG succeeds.
 
 Steps:
-  load_curated  → feature_build  → kfold_train (LR + LightGBM)
-  → eval        → register_model
+  load_curated  -> feature_build  -> kfold_train (LR + LightGBM)
+  -> eval        -> register_model
 
 Schedule: Triggered externally after data_pipeline_dag, or weekly on Monday 03:00 UTC.
 """
@@ -45,7 +45,7 @@ default_args = {
 # ── DAG ────────────────────────────────────────────────────────────────────────
 with DAG(
     dag_id="training_dag",
-    description="Load curated data → Feature build → K-Fold train → Eval → Register model",
+    description="Load curated data -> Feature build -> K-Fold train -> Eval -> Register model",
     schedule_interval="0 3 * * 1",   # Weekly Monday 03:00 UTC; trigger manually after data DAG
     default_args=default_args,
     catchup=False,

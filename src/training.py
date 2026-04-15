@@ -291,7 +291,7 @@ def _log_feature_importance(model: lgb.LGBMClassifier, n_features: int) -> None:
         fig.savefig(fig_path, dpi=120)
         plt.close(fig)
         mlflow.log_artifact(fig_path, artifact_path="plots")
-        logger.info(f"  Feature importance plot saved → {fig_path}")
+        logger.info(f"  Feature importance plot saved -> {fig_path}")
     except Exception as exc:
         logger.warning(f"  Could not generate feature importance plot: {exc}")
 
@@ -413,7 +413,7 @@ def evaluate_model(
         cost_matrix: Dict with 'fp_cost' and 'fn_cost' keys
 
     Returns:
-        Dict of metric name → value
+        Dict of metric name -> value
     """
     logger.info("=" * 60)
     logger.info(f"EVALUATION — {model_name.upper()}")
@@ -434,7 +434,7 @@ def evaluate_model(
     tn, fp, fn, tp = confusion_matrix(y_test, preds, labels=[0, 1]).ravel()
     expected_cost  = fp * fp_cost + fn * fn_cost
 
-    # Baseline: flag every transaction → zero FN but max FP
+    # Baseline: flag every transaction -> zero FN but max FP
     baseline_cost  = int((y_test == 0).sum()) * fp_cost
     cost_savings   = baseline_cost - expected_cost
 
@@ -587,7 +587,7 @@ def register_best_model(
 
     run_id  = mlflow.active_run().info.run_id
     model_uri = f"runs:/{run_id}/{artifact_path}"
-    logger.info(f"  Registered '{registry_name}'  →  {model_uri}")
+    logger.info(f"  Registered '{registry_name}'  ->  {model_uri}")
 
     # Local metadata export
     os.makedirs("artifacts/models", exist_ok=True)
@@ -602,7 +602,7 @@ def register_best_model(
     meta_path = "artifacts/models/best_model_meta.json"
     with open(meta_path, "w") as fh:
         json.dump(meta, fh, indent=2)
-    logger.info(f"  Metadata saved → {meta_path}")
+    logger.info(f"  Metadata saved -> {meta_path}")
 
     mlflow.log_artifact(meta_path, artifact_path="model_meta")
 

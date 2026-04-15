@@ -178,7 +178,7 @@ def log_params(params: Dict[str, Any], prefix: str = "") -> None:
     and prefixing every key with ``prefix`` if given.
 
     Args:
-        params: Dict of param_name → value.
+        params: Dict of param_name -> value.
         prefix: Optional prefix added to every key (e.g. ``"lgbm_"``).
     """
     safe = {}
@@ -199,7 +199,7 @@ def log_metrics_dict(metrics: Dict[str, float], step: Optional[int] = None) -> N
     Log a dict of metrics in one call, skipping non-numeric values.
 
     Args:
-        metrics: Dict of metric_name → numeric value.
+        metrics: Dict of metric_name -> numeric value.
         step:    Optional step/epoch number.
     """
     numeric = {}
@@ -236,7 +236,7 @@ def log_data_quality(report: Dict[str, Any], artifact_filename: str = "data_qual
     with open(local_path, "w", encoding="utf-8") as fh:
         json.dump(report, fh, indent=2, default=str)
     mlflow.log_artifact(local_path, artifact_path="data_quality")
-    logger.info(f"Data quality report logged → {local_path}")
+    logger.info(f"Data quality report logged -> {local_path}")
 
 
 # =============================================================================
@@ -253,7 +253,7 @@ def promote_model(
     """
     Transition a registered model version to the target stage.
 
-    Stages: ``"None"`` → ``"Staging"`` → ``"Production"`` → ``"Archived"``
+    Stages: ``"None"`` -> ``"Staging"`` -> ``"Production"`` -> ``"Archived"``
 
     Args:
         model_name:       Registry name (defaults to config ``model_registry_name``).
@@ -290,7 +290,7 @@ def promote_model(
     if comment:
         client.update_model_version(name=name, version=version, description=comment)
 
-    logger.info(f"  Promoted '{name}' v{version} → {stage}")
+    logger.info(f"  Promoted '{name}' v{version} -> {stage}")
 
 
 def get_production_model(model_name: Optional[str] = None) -> mlflow.pyfunc.PyFuncModel:

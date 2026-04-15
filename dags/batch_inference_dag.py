@@ -6,7 +6,7 @@ transactions from the test set (or any CSV pointed to by INFERENCE_INPUT),
 and exports predictions to artifacts/predictions/.
 
 Steps:
-  load_model  → score_batch  → export_scores
+  load_model  -> score_batch  -> export_scores
 
 Schedule: Daily at 04:00 UTC (after training_dag has a chance to run overnight).
 """
@@ -46,7 +46,7 @@ default_args = {
 # ── DAG ────────────────────────────────────────────────────────────────────────
 with DAG(
     dag_id="batch_inference_dag",
-    description="Load Production model → Score batch → Export predictions CSV",
+    description="Load Production model -> Score batch -> Export predictions CSV",
     schedule_interval="0 4 * * *",   # Daily at 04:00 UTC
     default_args=default_args,
     catchup=False,
@@ -78,7 +78,7 @@ with DAG(
         model_uri = None
         source    = None
 
-        # Try Production → Staging → local meta
+        # Try Production -> Staging -> local meta
         for stage in ("Production", "Staging"):
             try:
                 uri = f"models:/{registry_name}/{stage}"
@@ -119,7 +119,7 @@ with DAG(
         python_callable=_load_model,
         doc_md="""
         **load_model**
-        Resolves the model URI in order: `Production` → `Staging` → local meta JSON.
+        Resolves the model URI in order: `Production` -> `Staging` -> local meta JSON.
         Raises if no model is available. Pushes `model_info` dict to XCom.
         """,
     )
@@ -229,8 +229,8 @@ with DAG(
         with open(summary_path, "w") as fh:
             json.dump(summary, fh, indent=2)
 
-        print(f"\n  ✓ Predictions → {csv_path}")
-        print(f"  ✓ Summary     → {summary_path}")
+        print(f"\n  ✓ Predictions -> {csv_path}")
+        print(f"  ✓ Summary     -> {summary_path}")
         print(f"  Total scored  : {score_stats['total_scored']:,}")
         print(f"  Fraud flagged : {score_stats['fraud_flagged']:,} ({score_stats['fraud_rate']:.2%})")
 

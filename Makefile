@@ -36,6 +36,8 @@ PYTEST        := pytest
 RUFF          := ruff
 BLACK         := black
 MLFLOW_COMPOSE := docker-compose.mlflow.yml
+COMPOSE        := docker-compose.yml
+COMPOSE_STREAM := docker-compose.yml --profile streaming
 
 RAW_DATA      := data/raw/Fraud_Data.csv
 PROCESSED_SENTINEL := artifacts/data/X_train.csv
@@ -52,9 +54,12 @@ MLFLOW_URI    := file:./mlruns
 # Phony targets — never treated as file names
 .PHONY: all setup data train train-lgbm train-lr \
         stream stream-demo producer inference analytics \
+        kafka-start kafka-stop kafka-status kafka-topics kafka-logs \
+        airflow-start airflow-stop airflow-status airflow-logs airflow-ui \
+        infra-start infra-stop stack-start stack-stop stack-status \
         mlflow-start mlflow-stop mlflow-restart mlflow-status \
         mlflow-logs mlflow-ui mlflow-promote mlflow-compare mlflow-clean \
-        test lint format \
+        docker-build test lint format \
         clean clean-data clean-models \
         dirs check-data help
 
@@ -78,12 +83,33 @@ help:
 	@echo "    make train-lgbm       Train LightGBM only"
 	@echo "    make train-lr         Train Logistic Regression only"
 	@echo ""
-	@echo "  Streaming:"
-	@echo "    make stream-demo      Local demo (no Kafka needed)"
-	@echo "    make stream           Start all three Kafka services (threaded)"
+	@echo "  Streaming (Python, no Docker):"
+	@echo "    make stream-demo      Local in-process demo (no Kafka)"
+	@echo "    make stream           All 3 services in threads"
 	@echo "    make producer         Kafka producer only"
 	@echo "    make inference        Kafka inference consumer only"
 	@echo "    make analytics        Kafka analytics consumer only"
+	@echo ""
+	@echo "  Kafka (Docker):"
+	@echo "    make kafka-start      Start Zookeeper + Kafka + UI"
+	@echo "    make kafka-stop       Stop Kafka services"
+	@echo "    make kafka-status     Show Kafka container status"
+	@echo "    make kafka-topics     List all Kafka topics"
+	@echo "    make kafka-logs       Tail Kafka broker logs"
+	@echo ""
+	@echo "  Airflow (Docker):"
+	@echo "    make airflow-start    Start Airflow webserver + scheduler"
+	@echo "    make airflow-stop     Stop Airflow services"
+	@echo "    make airflow-status   Show Airflow container status"
+	@echo "    make airflow-logs     Tail Airflow logs"
+	@echo "    make airflow-ui       Open UI at http://localhost:8081"
+	@echo ""
+	@echo "  Full Stack (Docker):"
+	@echo "    make infra-start      Kafka + MLflow only"
+	@echo "    make stack-start      Full stack (+ Airflow)"
+	@echo "    make stack-stop       Stop everything"
+	@echo "    make stack-status     All container status"
+	@echo "    make docker-build     Build streaming service images"
 	@echo ""
 	@echo "  MLflow Server:"
 	@echo "    make mlflow-start     Start tracking server (Docker)"
@@ -388,3 +414,139 @@ import shutil; \
 shutil.rmtree('artifacts/models', ignore_errors=True); \
 shutil.rmtree('mlruns', ignore_errors=True); \
 print('  ✓ Model artifacts removed')"
+
+# =============================================================================
+# KAFKA (Docker)
+# =============================================================================
+
+## Start Zookeeper + Kafka + Kafka-UI
+kafka-start:
+	@echo ""
+	@echo "  ╔══════════════════════════════════════════════════════════╗"
+	@echo "  ║            STARTING KAFKA INFRASTRUCTURE                 ║"
+	@echo "  ╚══════════════════════════════════════════════════════════╝"
+	docker-compose -f $(COMPOSE) up -d zookeeper kafka kafka-init kafka-ui
+	@echo "  Kafka UI  → http://localhost:8080"
+	@echo "  Bootstrap → localhost:9093  (from host)"
+
+## Stop Kafka + Zookeeper
+kafka-stop:
+	@echo "  ── Stopping Kafka services ──────────────────────────────────"
+	docker-compose -f $(COMPOSE) stop kafka kafka-init kafka-ui zookeeper
+	docker-compose -f $(COMPOSE) rm -f  kafka kafka-init kafka-ui zookeeper
+	@echo "  ✓ Kafka stopped"
+
+## Show Kafka container status
+kafka-status:
+	docker-compose -f $(COMPOSE) ps zookeeper kafka kafka-ui
+
+## List all Kafka topics
+kafka-topics:
+	@echo "  ── Kafka topics ─────────────────────────────────────────────"
+	docker-compose -f $(COMPOSE) exec kafka \
+		kafka-topics --bootstrap-server localhost:9092 --list
+
+## Tail Kafka broker logs
+kafka-logs:
+	docker-compose -f $(COMPOSE) logs -f kafka
+
+# =============================================================================
+# AIRFLOW (Docker)
+# =============================================================================
+
+## Initialise the Airflow DB and create the admin user (run once)
+airflow-init:
+	@echo "  ── Initialising Airflow DB ──────────────────────────────────"
+	docker-compose -f $(COMPOSE) up airflow-init
+	@echo "  ✓ Airflow DB initialised  (admin / admin)"
+
+## Start Airflow webserver + scheduler
+airflow-start:
+	@echo ""
+	@echo "  ╔══════════════════════════════════════════════════════════╗"
+	@echo "  ║              STARTING AIRFLOW                            ║"
+	@echo "  ╚══════════════════════════════════════════════════════════╝"
+	docker-compose -f $(COMPOSE) up -d airflow-db airflow-webserver airflow-scheduler
+	@echo "  Airflow UI → http://localhost:8081  (admin / admin)"
+
+## Stop Airflow services
+airflow-stop:
+	@echo "  ── Stopping Airflow ─────────────────────────────────────────"
+	docker-compose -f $(COMPOSE) stop airflow-webserver airflow-scheduler airflow-db
+	docker-compose -f $(COMPOSE) rm -f airflow-webserver airflow-scheduler
+	@echo "  ✓ Airflow stopped"
+
+## Show Airflow container status
+airflow-status:
+	docker-compose -f $(COMPOSE) ps airflow-db airflow-webserver airflow-scheduler
+
+## Tail Airflow logs (both webserver and scheduler)
+airflow-logs:
+	docker-compose -f $(COMPOSE) logs -f airflow-webserver airflow-scheduler
+
+## Open Airflow UI in browser
+airflow-ui:
+	@$(PYTHON) -c "\
+import webbrowser; \
+opened = webbrowser.open('http://localhost:8081', new=2); \
+print('  Browser opened → http://localhost:8081' if opened \
+      else '  Open manually: http://localhost:8081')"
+
+# =============================================================================
+# FULL DOCKER STACK
+# =============================================================================
+
+## Build streaming service Docker images
+docker-build:
+	@echo "  ── Building fraud-detection Docker image ────────────────────"
+	docker-compose -f $(COMPOSE) build producer inference analytics
+	@echo "  ✓ Images built"
+
+## Start infrastructure only: Kafka + MLflow (no Airflow, no streaming)
+infra-start:
+	@echo ""
+	@echo "  ╔══════════════════════════════════════════════════════════╗"
+	@echo "  ║         STARTING INFRASTRUCTURE (Kafka + MLflow)         ║"
+	@echo "  ╚══════════════════════════════════════════════════════════╝"
+	docker-compose -f $(COMPOSE) up -d \
+		zookeeper kafka kafka-init kafka-ui \
+		mlflow-db mlflow
+	@echo ""
+	@echo "  Kafka UI  → http://localhost:8080"
+	@echo "  MLflow UI → http://localhost:5001"
+
+## Start the full stack: infra + Airflow (no streaming services)
+stack-start:
+	@echo ""
+	@echo "  ╔══════════════════════════════════════════════════════════╗"
+	@echo "  ║                STARTING FULL STACK                       ║"
+	@echo "  ╚══════════════════════════════════════════════════════════╝"
+	docker-compose -f $(COMPOSE) up -d \
+		zookeeper kafka kafka-init kafka-ui \
+		mlflow-db mlflow \
+		airflow-db airflow-init airflow-webserver airflow-scheduler
+	@echo ""
+	@echo "  Services:"
+	@echo "    Kafka UI   → http://localhost:8080"
+	@echo "    MLflow UI  → http://localhost:5001"
+	@echo "    Airflow UI → http://localhost:8081  (admin / admin)"
+
+## Start streaming services on top of the full stack
+## Requires: make stack-start + make train (to have a model)
+stream-docker:
+	@echo "  ── Starting streaming services (Docker) ─────────────────────"
+	docker-compose -f $(COMPOSE_STREAM) up -d producer inference analytics
+
+## Stop ALL docker-compose services
+stack-stop:
+	@echo "  ── Stopping full stack ───────────────────────────────────────"
+	docker-compose -f $(COMPOSE) --profile streaming down
+	@echo "  ✓ Full stack stopped"
+
+## Show status of all containers
+stack-status:
+	@echo ""
+	@echo "  ── Stack status ─────────────────────────────────────────────"
+	docker-compose -f $(COMPOSE) --profile streaming ps
+
+

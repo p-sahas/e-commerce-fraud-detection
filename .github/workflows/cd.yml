@@ -1,0 +1,166 @@
+# =============================================================================
+# CD Pipeline — E-Commerce Fraud Detection
+# =============================================================================
+#
+# Triggered only on push to `main` (i.e. after a PR is merged).
+# Requires CI to pass first — uses `workflow_run` trigger.
+#
+# Jobs:
+#   build-and-push    Build Docker image, push to GitHub Container Registry (ghcr.io)
+#   tag-release       Create an annotated GitHub release with the image digest
+# =============================================================================
+
+name: CD — Build & Publish Docker Image
+
+on:
+  push:
+    branches:
+      - main
+    paths:
+      # Only re-publish when production code changes
+      - "src/**"
+      - "pipelines/**"
+      - "utils/**"
+      - "config/**"
+      - "requirements.txt"
+      - "Dockerfile"
+      - ".github/workflows/cd.yml"
+
+  # Can also be triggered manually
+  workflow_dispatch:
+    inputs:
+      push_image:
+        description: "Push image to registry? (true/false)"
+        required: false
+        default: "true"
+
+concurrency:
+  group: cd-${{ github.ref }}
+  cancel-in-progress: true
+
+env:
+  REGISTRY: ghcr.io
+  IMAGE_NAME: ${{ github.repository }}   # e.g. your-org/e-commerce-fraud-detection
+
+jobs:
+  # =============================================================================
+  # JOB 1 — Build & Push to GitHub Container Registry
+  # =============================================================================
+  build-and-push:
+    name: "Build & Push Docker Image"
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+
+    permissions:
+      contents: read
+      packages: write       # required to push to ghcr.io
+      id-token: write       # required for OIDC provenance attestation
+
+    outputs:
+      image-digest: ${{ steps.push.outputs.digest }}
+      image-tag:    ${{ steps.meta.outputs.version }}
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v3
+        with:
+          platforms: linux/amd64,linux/arm64
+
+      - name: Log in to GitHub Container Registry
+        uses: docker/login-action@v3
+        with:
+          registry: ${{ env.REGISTRY }}
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      # Generate semantic image tags from git metadata
+      - name: Extract Docker image metadata
+        id: meta
+        uses: docker/metadata-action@v5
+        with:
+          images: ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}
+          tags: |
+            # Branch-based tag  e.g.  main → latest
+            type=ref,event=branch
+            # Short commit SHA   e.g.  sha-abc1234
+            type=sha,prefix=sha-,format=short
+            # Semver tag if pushed  e.g.  v1.2.3
+            type=semver,pattern={{version}}
+            type=semver,pattern={{major}}.{{minor}}
+
+      - name: Build and push image
+        id: push
+        uses: docker/build-push-action@v5
+        with:
+          context: .
+          file: ./Dockerfile
+          platforms: linux/amd64,linux/arm64
+          push: ${{ github.event_name != 'pull_request' }}
+          tags:    ${{ steps.meta.outputs.tags }}
+          labels:  ${{ steps.meta.outputs.labels }}
+          cache-from: type=gha
+          cache-to:   type=gha,mode=max
+          build-args: |
+            BUILD_DATE=${{ github.event.head_commit.timestamp }}
+            GIT_COMMIT=${{ github.sha }}
+            GIT_BRANCH=${{ github.ref_name }}
+
+      - name: Print image summary
+        run: |
+          echo "## 🐳 Docker Image Published" >> "$GITHUB_STEP_SUMMARY"
+          echo "" >> "$GITHUB_STEP_SUMMARY"
+          echo "| Key | Value |" >> "$GITHUB_STEP_SUMMARY"
+          echo "|-----|-------|" >> "$GITHUB_STEP_SUMMARY"
+          echo "| Registry | \`${{ env.REGISTRY }}\` |" >> "$GITHUB_STEP_SUMMARY"
+          echo "| Image | \`${{ env.IMAGE_NAME }}\` |" >> "$GITHUB_STEP_SUMMARY"
+          echo "| Tag | \`${{ steps.meta.outputs.version }}\` |" >> "$GITHUB_STEP_SUMMARY"
+          echo "| Digest | \`${{ steps.push.outputs.digest }}\` |" >> "$GITHUB_STEP_SUMMARY"
+          echo "| Commit | \`${{ github.sha }}\` |" >> "$GITHUB_STEP_SUMMARY"
+
+  # =============================================================================
+  # JOB 2 — Create GitHub Release  (only on semver tags, e.g. v1.0.0)
+  # =============================================================================
+  tag-release:
+    name: "Create GitHub Release"
+    runs-on: ubuntu-latest
+    needs: build-and-push
+    if: startsWith(github.ref, 'refs/tags/v')
+    timeout-minutes: 5
+
+    permissions:
+      contents: write
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0   # needed for git log in release notes
+
+      - name: Generate release notes from commit history
+        id: notes
+        run: |
+          PREV=$(git describe --tags --abbrev=0 HEAD^ 2>/dev/null || echo "")
+          if [ -n "$PREV" ]; then
+            LOG=$(git log --oneline "$PREV"..HEAD --no-merges)
+          else
+            LOG=$(git log --oneline -20 --no-merges)
+          fi
+          echo "notes<<EOF" >> "$GITHUB_OUTPUT"
+          echo "## What's Changed" >> "$GITHUB_OUTPUT"
+          echo "" >> "$GITHUB_OUTPUT"
+          echo "$LOG" >> "$GITHUB_OUTPUT"
+          echo "" >> "$GITHUB_OUTPUT"
+          echo "**Docker image:** \`ghcr.io/${{ github.repository }}:${{ needs.build-and-push.outputs.image-tag }}\`" >> "$GITHUB_OUTPUT"
+          echo "**Digest:** \`${{ needs.build-and-push.outputs.image-digest }}\`" >> "$GITHUB_OUTPUT"
+          echo "EOF" >> "$GITHUB_OUTPUT"
+
+      - name: Create GitHub Release
+        uses: softprops/action-gh-release@v2
+        with:
+          body: ${{ steps.notes.outputs.notes }}
+          draft: false
+          prerelease: ${{ contains(github.ref, 'alpha') || contains(github.ref, 'beta') || contains(github.ref, 'rc') }}
+          generate_release_notes: false

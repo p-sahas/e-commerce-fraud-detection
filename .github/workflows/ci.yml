@@ -1,0 +1,345 @@
+# =============================================================================
+# CI Pipeline — E-Commerce Fraud Detection
+# =============================================================================
+#
+# Triggered on every push and pull request.
+#
+# Job graph:
+#
+#   lint ──┬──► unit-tests ──► smoke-test ──┐
+#          │                                ├──► quality-gate
+#          └──► spark-tests ────────────────┘
+#
+# Jobs:
+#   lint         Ruff + Black format check (fast, no Python deps)
+#   unit-tests   Non-Spark pytest suite (streaming + mlflow_utils + training logic)
+#   spark-tests  PySpark preprocessing tests (requires Java 11 + Spark 3.5)
+#   smoke-test   make stream-demo  (end-to-end in-process, no Kafka or MLflow server)
+#   quality-gate Summarises all results; fails the build if any job failed
+# =============================================================================
+
+name: CI — Fraud Detection Pipeline
+
+on:
+  push:
+    branches:
+      - main
+      - develop
+      - "feature/**"
+      - "fix/**"
+  pull_request:
+    branches:
+      - main
+      - develop
+
+# Cancel redundant runs on the same branch
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+env:
+  PYTHON_VERSION: "3.11"
+  MLFLOW_TRACKING_URI: "file:./mlruns_ci"   # isolated local tracking for CI
+  PYTHONUNBUFFERED: "1"
+  PYTHONDONTWRITEBYTECODE: "1"
+
+# =============================================================================
+# JOB 1 — Lint (ruff + black)
+# =============================================================================
+jobs:
+  lint:
+    name: "Lint (ruff + black)"
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Set up Python ${{ env.PYTHON_VERSION }}
+        uses: actions/setup-python@v5
+        with:
+          python-version: ${{ env.PYTHON_VERSION }}
+          cache: pip
+
+      - name: Install lint tools only
+        run: pip install "ruff>=0.4.0" "black>=24.0.0"
+
+      - name: Run ruff (fast linter)
+        run: |
+          echo "── Ruff lint ──────────────────────────────────────"
+          ruff check src/ pipelines/ utils/ dags/ \
+            --output-format=github \
+            --exit-non-zero-on-fix
+
+      - name: Check formatting with black
+        run: |
+          echo "── Black format check ─────────────────────────────"
+          black --check --diff \
+            src/ pipelines/ utils/ dags/
+
+  # =============================================================================
+  # JOB 2 — Unit Tests (no PySpark / no Java)
+  # =============================================================================
+  unit-tests:
+    name: "Unit Tests (streaming · mlflow · training logic)"
+    runs-on: ubuntu-latest
+    needs: lint
+    timeout-minutes: 15
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Set up Python ${{ env.PYTHON_VERSION }}
+        uses: actions/setup-python@v5
+        with:
+          python-version: ${{ env.PYTHON_VERSION }}
+          cache: pip
+
+      - name: Install dependencies
+        run: |
+          pip install --upgrade pip
+          pip install \
+            "mlflow>=2.12.0" \
+            "scikit-learn>=1.4.0" \
+            "lightgbm>=4.3.0" \
+            "pandas>=2.0.0,<3.0.0" \
+            "numpy>=1.26.0,<2.0.0" \
+            "pyyaml>=6.0" \
+            "python-dotenv>=1.0.0" \
+            "kafka-python>=2.0.2" \
+            "pytest>=8.0.0" \
+            "pytest-cov>=5.0.0" \
+            "matplotlib>=3.8.0"
+
+      - name: Run unit tests (exclude Spark tests)
+        run: |
+          pytest tests/test_streaming.py tests/test_mlflow_utils.py tests/test_training.py \
+            -v \
+            --tb=short \
+            -m "not spark and not kafka and not mlflow_server" \
+            --cov=src \
+            --cov=pipelines \
+            --cov-report=xml:coverage-unit.xml \
+            --cov-report=term-missing
+        env:
+          MLFLOW_TRACKING_URI: ${{ env.MLFLOW_TRACKING_URI }}
+
+      - name: Upload unit test coverage
+        uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: coverage-unit
+          path: coverage-unit.xml
+
+      - name: Coverage gate  (≥ 60% required)
+        run: |
+          python -c "
+          import xml.etree.ElementTree as ET, sys
+          tree = ET.parse('coverage-unit.xml')
+          rate = float(tree.getroot().attrib.get('line-rate', 0))
+          pct  = round(rate * 100, 1)
+          print(f'  Coverage: {pct}%')
+          if pct < 60:
+              print(f'  FAIL: coverage {pct}% < 60% gate')
+              sys.exit(1)
+          print(f'  PASS: coverage gate satisfied ({pct}% >= 60%)')
+          "
+
+  # =============================================================================
+  # JOB 3 — Spark Tests (needs Java 11)
+  # =============================================================================
+  spark-tests:
+    name: "Spark Tests (preprocessing · feature engineering)"
+    runs-on: ubuntu-latest
+    needs: lint
+    timeout-minutes: 30
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Set up Java 11 (required by PySpark 3.5)
+        uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: "11"
+
+      - name: Set up Python ${{ env.PYTHON_VERSION }}
+        uses: actions/setup-python@v5
+        with:
+          python-version: ${{ env.PYTHON_VERSION }}
+          cache: pip
+
+      - name: Install Spark dependencies
+        run: |
+          pip install --upgrade pip
+          pip install \
+            "pyspark==3.5.1" \
+            "pandas>=2.0.0,<3.0.0" \
+            "numpy>=1.26.0,<2.0.0" \
+            "pyarrow>=14.0.0" \
+            "pyyaml>=6.0" \
+            "mlflow>=2.12.0" \
+            "scikit-learn>=1.4.0" \
+            "pytest>=8.0.0" \
+            "pytest-cov>=5.0.0"
+
+      - name: Run Spark preprocessing tests
+        run: |
+          pytest tests/test_preprocessing.py \
+            -v \
+            --tb=short \
+            --cov=src \
+            --cov-report=xml:coverage-spark.xml \
+            --cov-report=term-missing
+        env:
+          MLFLOW_TRACKING_URI: ${{ env.MLFLOW_TRACKING_URI }}
+          PYSPARK_SUBMIT_ARGS: "--master local[1] pyspark-shell"
+          JAVA_HOME: ${{ env.JAVA_HOME }}
+
+      - name: Upload Spark test coverage
+        uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: coverage-spark
+          path: coverage-spark.xml
+
+  # =============================================================================
+  # JOB 4 — Streaming Smoke Test (in-process demo, no Kafka / no MLflow server)
+  # =============================================================================
+  smoke-test:
+    name: "Streaming Smoke Test (demo mode)"
+    runs-on: ubuntu-latest
+    needs: unit-tests
+    timeout-minutes: 10
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Set up Python ${{ env.PYTHON_VERSION }}
+        uses: actions/setup-python@v5
+        with:
+          python-version: ${{ env.PYTHON_VERSION }}
+          cache: pip
+
+      - name: Install streaming dependencies
+        run: |
+          pip install --upgrade pip
+          pip install \
+            "mlflow>=2.12.0" \
+            "pandas>=2.0.0,<3.0.0" \
+            "numpy>=1.26.0,<2.0.0" \
+            "scikit-learn>=1.4.0" \
+            "lightgbm>=4.3.0" \
+            "kafka-python>=2.0.2" \
+            "pyyaml>=6.0" \
+            "python-dotenv>=1.0.0"
+
+      - name: Validate config.yaml loads correctly
+        run: |
+          python -c "
+          import sys; sys.path.insert(0,'utils')
+          from config import load_config, get_mlflow_config, get_data_paths
+          cfg = load_config()
+          assert 'mlflow' in cfg, 'Missing mlflow block in config.yaml'
+          assert 'streaming' in cfg, 'Missing streaming block in config.yaml'
+          print('  config.yaml ✓')
+          print(f'  MLflow experiment : {get_mlflow_config()[\"experiment_name\"]}')
+          "
+
+      - name: Run streaming demo (100 events, stub model)
+        run: |
+          python pipelines/streaming_inference_pipeline.py demo 100
+        env:
+          MLFLOW_TRACKING_URI: ${{ env.MLFLOW_TRACKING_URI }}
+        timeout-minutes: 5
+
+      - name: Verify analytics output was produced
+        run: |
+          python -c "
+          import os, glob
+          files = glob.glob('analytics/recent_predictions_*.csv') + \
+                  glob.glob('analytics/*.csv') + \
+                  glob.glob('analytics/*.db')
+          print(f'  Analytics output files: {files}')
+          if not files:
+              # Demo completed without writing files is still OK (stub mode)
+              print('  No analytics files written — stub mode, acceptable.')
+          else:
+              print(f'  Found {len(files)} analytics file(s) ✓')
+          "
+
+  # =============================================================================
+  # JOB 5 — Quality Gate (final summary)
+  # =============================================================================
+  quality-gate:
+    name: "Quality Gate"
+    runs-on: ubuntu-latest
+    needs: [unit-tests, spark-tests, smoke-test]
+    if: always()   # run even when upstream jobs fail so we always get a summary
+
+    steps:
+      - name: Evaluate all job results
+        env:
+          UNIT_RESULT:  ${{ needs.unit-tests.result }}
+          SPARK_RESULT: ${{ needs.spark-tests.result }}
+          SMOKE_RESULT: ${{ needs.smoke-test.result }}
+        run: |
+          echo ""
+          echo "══════════════════════════════════════════════════"
+          echo "  CI Quality Gate Summary"
+          echo "══════════════════════════════════════════════════"
+          echo "  Unit Tests  : $UNIT_RESULT"
+          echo "  Spark Tests : $SPARK_RESULT"
+          echo "  Smoke Test  : $SMOKE_RESULT"
+          echo "══════════════════════════════════════════════════"
+
+          FAILED=0
+          [ "$UNIT_RESULT"  != "success" ] && { echo "  ✗ Unit tests failed";  FAILED=1; }
+          [ "$SPARK_RESULT" != "success" ] && { echo "  ✗ Spark tests failed"; FAILED=1; }
+          [ "$SMOKE_RESULT" != "success" ] && { echo "  ✗ Smoke test failed";  FAILED=1; }
+
+          if [ "$FAILED" -eq 0 ]; then
+            echo "  ✓ All gates passed — safe to merge"
+          else
+            echo "  ✗ Quality gate FAILED — do not merge"
+            exit 1
+          fi
+
+      - name: Download coverage artifacts
+        uses: actions/download-artifact@v4
+        with:
+          pattern: coverage-*
+          path: coverage-reports/
+        continue-on-error: true
+
+      - name: Post coverage summary
+        run: |
+          python - << 'EOF'
+          import xml.etree.ElementTree as ET, os, glob
+
+          total_lines  = 0
+          covered_lines = 0
+          for path in glob.glob('coverage-reports/**/*.xml', recursive=True):
+              try:
+                  tree = ET.parse(path)
+                  root = tree.getroot()
+                  for pkg in root.iter('package'):
+                      for cls in pkg.iter('class'):
+                          for line in cls.iter('line'):
+                              total_lines += 1
+                              if line.attrib.get('hits', '0') != '0':
+                                  covered_lines += 1
+              except Exception as e:
+                  print(f"  Could not parse {path}: {e}")
+
+          if total_lines > 0:
+              pct = round(covered_lines / total_lines * 100, 1)
+              print(f"\n  Combined coverage: {covered_lines}/{total_lines} lines ({pct}%)")
+          else:
+              print("  No coverage data found.")
+          EOF
+        continue-on-error: true

@@ -1,0 +1,26 @@
+# .trufflehog-ignore
+# Paths to exclude from TruffleHog secret scanning
+# Format: one glob pattern per line
+
+# Generated / vendor directories
+.git/
+__pycache__/
+.venv/
+venv/
+node_modules/
+
+# Test fixtures — may contain fake credentials
+tests/
+
+# Data files — not code
+data/
+artifacts/
+analytics/
+mlruns/
+mlruns_ci/
+
+# Notebooks — cells may contain example output with mock credentials
+notebooks/
+
+# Example env file — intentionally contains placeholder values
+.env.example

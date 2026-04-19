@@ -1,0 +1,152 @@
+# =============================================================================
+# Security & Dependency Scan — E-Commerce Fraud Detection
+# =============================================================================
+#
+# Runs weekly and on every push to main.
+# Scans for:
+#   - Known CVEs in Python dependencies (pip-audit)
+#   - Hardcoded secrets (trufflesecurity/trufflehog)
+#   - Static code security issues (bandit SAST)
+# =============================================================================
+
+name: Security Scan
+
+on:
+  schedule:
+    - cron: "0 3 * * 1"   # Every Monday at 03:00 UTC
+  push:
+    branches: [main]
+  workflow_dispatch:
+
+concurrency:
+  group: security-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  # =============================================================================
+  # Dependency vulnerability scan
+  # =============================================================================
+  pip-audit:
+    name: "Dependency CVE Scan (pip-audit)"
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+          cache: pip
+
+      - name: Install pip-audit
+        run: pip install pip-audit
+
+      - name: Audit requirements.txt
+        run: |
+          pip-audit \
+            --requirement requirements.txt \
+            --format json \
+            --output pip-audit-report.json \
+            --ignore-vuln GHSA-w235-7p84-xx57   # known false-positive in boto3 stub
+        continue-on-error: true
+
+      - name: Print audit summary
+        run: |
+          python -c "
+          import json, sys
+          with open('pip-audit-report.json') as f:
+              data = json.load(f)
+          vulns = data.get('vulnerabilities', [])
+          if not vulns:
+              print('  No vulnerabilities found ✓')
+          else:
+              print(f'  Found {len(vulns)} vulnerabilities:')
+              for v in vulns:
+                  sev = v.get('fix_versions', ['no fix'])
+                  print(f\"  [{v['id']}] {v['name']} {v['version']} — fix: {sev}\")
+              sys.exit(1)
+          "
+
+      - name: Upload pip-audit report
+        uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: pip-audit-report
+          path: pip-audit-report.json
+
+  # =============================================================================
+  # Static Application Security Testing (Bandit)
+  # =============================================================================
+  bandit:
+    name: "SAST — Bandit"
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+
+      - name: Install bandit
+        run: pip install "bandit[toml]>=1.7"
+
+      - name: Run bandit on src/ and pipelines/
+        run: |
+          bandit \
+            --recursive src/ pipelines/ \
+            --severity-level medium \
+            --confidence-level medium \
+            --format json \
+            --output bandit-report.json
+        continue-on-error: true
+
+      - name: Print bandit summary
+        run: |
+          python -c "
+          import json, sys
+          with open('bandit-report.json') as f:
+              data = json.load(f)
+          results = data.get('results', [])
+          high = [r for r in results if r['issue_severity'] == 'HIGH']
+          med  = [r for r in results if r['issue_severity'] == 'MEDIUM']
+          print(f'  HIGH severity: {len(high)}')
+          print(f'  MEDIUM severity: {len(med)}')
+          for r in high[:10]:
+              print(f\"  [{r['issue_severity']}] {r['test_id']}: {r['issue_text']} — {r['filename']}:{r['line_number']}\")
+          if high:
+              sys.exit(1)
+          print('  No HIGH-severity issues found ✓')
+          "
+
+      - name: Upload bandit report
+        uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: bandit-report
+          path: bandit-report.json
+
+  # =============================================================================
+  # Secret scanning (TruffleHog)
+  # =============================================================================
+  secret-scan:
+    name: "Secret Scan (TruffleHog)"
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0   # full history needed for diff-based scan
+
+      - name: Scan for secrets with TruffleHog
+        uses: trufflesecurity/trufflehog@main
+        with:
+          path: ./
+          base: ${{ github.event.repository.default_branch }}
+          head: HEAD
+          extra_args: >
+            --only-verified
+            --exclude-paths=.trufflehog-ignore

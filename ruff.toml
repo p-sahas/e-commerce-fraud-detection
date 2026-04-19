@@ -1,0 +1,71 @@
+# ruff.toml — linting configuration for E-Commerce Fraud Detection
+# https://docs.astral.sh/ruff/configuration/
+
+# Target Python version
+target-version = "py311"
+
+# Max line length (matches black)
+line-length = 100
+
+# Directories to include
+src = ["src", "pipelines", "utils", "dags", "tests"]
+
+# Files / directories to exclude
+exclude = [
+    ".git",
+    "__pycache__",
+    ".pytest_cache",
+    "mlruns",
+    "mlruns_ci",
+    "artifacts",
+    "analytics",
+    "data",
+    "notebooks",
+    ".venv",
+    "venv",
+]
+
+[lint]
+# Rule sets to enable
+select = [
+    "E",    # pycodestyle errors
+    "W",    # pycodestyle warnings
+    "F",    # pyflakes
+    "I",    # isort
+    "N",    # pep8-naming
+    "UP",   # pyupgrade
+    "B",    # flake8-bugbear
+    "C4",   # flake8-comprehensions
+    "SIM",  # flake8-simplify
+    "TID",  # flake8-tidy-imports
+    "RUF",  # ruff-specific rules
+]
+
+# Rules to explicitly ignore
+ignore = [
+    "E501",    # line too long — enforced by black instead
+    "B008",    # do not perform function calls in default args — common in ML code
+    "N803",    # argument name should be lowercase — X, Y convention in sklearn
+    "N806",    # variable in function should be lowercase — X_train, X_test etc.
+    "SIM108",  # use ternary operator — reduces readability in ML code
+    "UP007",   # use `X | Y` for type unions — Python 3.10+ only syntax
+    "RUF012",  # mutable class attributes — common in dataclass-like config objects
+]
+
+# Per-file rule overrides
+[lint.per-file-ignores]
+"tests/**" = [
+    "S101",    # assert statements OK in tests
+    "N802",    # function name lowercase — Test class methods
+    "B011",    # assert False — used in negative test assertions
+]
+"dags/**" = [
+    "B007",    # loop variable not used in loop body — Airflow pattern
+]
+"pipelines/**" = [
+    "T201",    # print statements OK in pipeline scripts
+]
+
+[lint.isort]
+known-first-party = ["src", "utils", "pipelines"]
+force-sort-within-sections = true
